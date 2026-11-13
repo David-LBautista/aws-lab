@@ -1,11 +1,12 @@
 # AWS Lab — Angular on AWS
 
-A production-style Angular SPA deployed on AWS with a custom domain, Amazon Cognito authentication, a serverless API protected by JWT, and a keyless CI/CD pipeline with separate dev and prod environments.
+A production-style Angular SPA deployed on AWS with a custom domain, Amazon Cognito authentication, a serverless API protected by JWT, a keyless CI/CD pipeline with separate dev and prod environments, and infrastructure as code with AWS CDK.
 
-| Environment | URL | Branch | Deploy |
-| --- | --- | --- | --- |
-| **prod** | https://lab.davidlucas.dev | `main` | Automatic after **manual approval** |
-| **dev** | https://dev-lab.davidlucas.dev | `develop` | Automatic on every push |
+| Environment | URL | Branch | Deploy | Infrastructure |
+| --- | --- | --- | --- | --- |
+| **prod** | https://lab.davidlucas.dev | `main` | Automatic after **manual approval** | Created in the console |
+| **dev** | https://dev-lab.davidlucas.dev | `develop` | Automatic on every push | Created in the console |
+| **qa** | CloudFront default domain | — | Manual upload | **AWS CDK** (`infra/`) |
 
 ---
 
@@ -25,7 +26,7 @@ flowchart LR
     APIGW --> L[Lambda<br/>Node.js]
 ```
 
-Each environment has its own S3 bucket, CloudFront distribution, ACM certificate and subdomain. Cognito and the API are shared and allow both origins.
+Each environment has its own S3 bucket and CloudFront distribution. Prod and dev also use ACM certificates and custom subdomains. Cognito and the API are shared and allow both origins.
 
 | Layer | Service | What it does |
 | --- | --- | --- |
@@ -52,8 +53,10 @@ Each environment has its own S3 bucket, CloudFront distribution, ACM certificate
 - **HTTP interceptor:** attaches the access token only to requests that target the API (`secureRoutes`), never to third-party URLs.
 - **Serverless API:** API Gateway rejects missing or invalid tokens with `401` before Lambda runs.
 - **Keyless CI/CD:** GitHub Actions assumes an IAM role through OIDC; no AWS access keys are stored anywhere.
-- **Dev and prod environments:** `develop` deploys to dev automatically; `main` deploys to prod only after a required reviewer approves.
-- **Rollback:** a manual workflow run can redeploy any previous tag or commit through the same approval gate.
+- **Dev and prod environments:** `develop` deploys to dev automatically; `main` deploys to prod after GitHub Environment approval is configured.
+- **Rollback:** a manual workflow run can redeploy a previous tag or commit.
+- **Automatic release tags:** every successful prod deploy creates the next semantic version tag (`v1.0.2`, `v1.0.3`, …).
+- **Infrastructure as code:** the QA hosting layer (S3 + CloudFront + OAC) is defined in AWS CDK and parameterized by environment.
 - **Modern Angular:** standalone components, signals and `computed` for session state, new control flow (`@if`, `@for`), zoneless change detection.
 
 ---
@@ -63,6 +66,7 @@ Each environment has its own S3 bucket, CloudFront distribution, ACM certificate
 - **Front end:** Angular, TypeScript, SCSS, [`angular-auth-oidc-client`](https://github.com/damienbod/angular-auth-oidc-client)
 - **AWS:** S3, CloudFront, ACM, Cognito, API Gateway (HTTP API), Lambda (Node.js), IAM, STS, CloudTrail, CloudWatch Logs
 - **CI/CD:** GitHub Actions, GitHub Environments
+- **Infrastructure as code:** AWS CDK (TypeScript), AWS CloudFormation
 - **DNS:** Cloudflare
 - **Tooling:** Angular CLI, AWS CLI v2
 
@@ -73,7 +77,10 @@ Each environment has its own S3 bucket, CloudFront distribution, ACM certificate
 ```
 .github/
 └── workflows/
-    └── deploy.yml           # Build + deploy to dev or prod, manual redeploy for rollback
+    └── deploy.yml           # Build + deploy to dev or prod, rollback, release tags
+infra/                       # AWS CDK app (own package.json)
+├── bin/infra.ts             # Entry point: one stack per environment
+└── lib/infra-stack.ts       # Hosting stack: private S3 bucket + CloudFront + OAC
 src/
 ├── app/
 │   ├── app.config.ts        # Router, HttpClient + auth interceptor, OIDC config
@@ -106,7 +113,7 @@ Open http://localhost:4200. `http://localhost:4200` is registered in Cognito as 
 ```mermaid
 flowchart LR
     D[push to develop] --> BD[Build] --> DEV[Deploy to dev<br/>dev-lab.davidlucas.dev]
-    PR[PR develop → main] --> M[merge to main] --> BP[Build] --> A{Approval<br/>required reviewer} -->|approved| PROD[Deploy to prod<br/>lab.davidlucas.dev]
+    PR[PR develop → main] --> M[merge to main] --> BP[Build] --> A{Approval<br/>GitHub Environment} -->|approved| PROD[Deploy to prod<br/>lab.davidlucas.dev]
 ```
 
 The workflow ([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)) runs on every push to `develop` or `main` and picks the environment from the branch:
@@ -114,17 +121,17 @@ The workflow ([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)) ru
 | | dev | prod |
 | --- | --- | --- |
 | Branch allowed to deploy | `develop` | `main` |
-| Approval | None | Required reviewer (admins cannot bypass) |
+| Approval | None | Configure a required reviewer in the GitHub `prod` environment |
 | IAM role | `github-actions-aws-lab-dev` | `github-actions-aws-lab-deploy` |
 | Variables | Its own bucket, distribution and role ARN | Its own bucket, distribution and role ARN |
 
-**Pipeline steps:** checkout → `npm ci` → `ng build` → assume the IAM role with OIDC → upload hashed assets with long-lived caching → upload `index.html` with `no-cache` → invalidate `/index.html` in CloudFront.
+**Pipeline steps:** checkout → `npm ci` → `ng build` → assume the IAM role with OIDC → upload hashed assets with long-lived caching → upload `index.html` with `no-cache` → invalidate `/index.html` in CloudFront. Successful prod deploys also create a release tag.
 
 Only `index.html` is invalidated: every other file has a content hash in its name, so a new build produces new file names.
 
 ### Authentication with OIDC
 
-GitHub Actions requests a signed OIDC token and exchanges it with AWS STS for temporary credentials (valid for one hour). Each role's trust policy only accepts tokens from this repository **and** its environment:
+GitHub Actions requests a signed OIDC token and exchanges it with AWS STS for temporary credentials (valid for one hour). Each role's trust policy should only accept tokens from this repository **and** its environment:
 
 ```json
 "Condition": {
@@ -143,10 +150,14 @@ Every stable prod release is tagged (`v1.0.0`, `v1.0.1`, …). To roll back:
 
 1. **Actions → Deploy to AWS → Run workflow**, from the `main` branch.
 2. Enter the tag or commit SHA to deploy (for example `v1.0.0`).
-3. Approve the prod deployment.
+3. Approve the prod deployment if the `prod` GitHub Environment has required reviewers.
 4. Fix forward in the code with `git revert` and a new PR, so `main` matches what is running in production.
 
 The deployment history (**Deployments → prod**) records every deploy with its commit, approver and timestamp.
+
+### Release tags
+
+After a successful prod deploy, the workflow finds the highest `v*` tag, bumps the patch number and pushes the new tag. Manual runs with a `ref` do not create tags, because they redeploy a version that is already tagged.
 
 ### Manual deployment (reference)
 
@@ -159,6 +170,43 @@ aws s3 cp dist/aws-lab/browser/index.html s3://<bucket-name>/index.html \
   --cache-control "no-cache"
 aws cloudfront create-invalidation --distribution-id <distribution-id> --paths "/index.html"
 ```
+
+---
+
+## Infrastructure as code (AWS CDK)
+
+The `infra/` folder is an AWS CDK app in TypeScript. One reusable stack defines the hosting layer, and each environment is a single line:
+
+```typescript
+new InfraStack(app, 'AwsLab-Qa-Hosting', { env, envName: 'qa' });
+```
+
+The current entry point deploys the QA stack. Dev and prod are commented examples and are still managed in the AWS console.
+
+The stack creates:
+
+| Resource | Configuration |
+| --- | --- |
+| S3 bucket | Block Public Access, S3-managed encryption, HTTPS-only bucket policy (`enforceSSL`) |
+| Origin Access Control | Only this distribution can read the bucket |
+| CloudFront distribution | `index.html` root object, HTTP → HTTPS, `CachingOptimized`, compression, managed **security headers** policy |
+| Error responses | `403`/`404` → `/index.html` with `200` for Angular routing |
+| Outputs | Bucket name, distribution ID and domain, used by the deploy step |
+
+```bash
+cd infra
+npm install
+cdk synth     # generate the CloudFormation template
+cdk diff      # preview changes, including IAM/security changes
+cdk deploy    # create or update the stack
+cdk destroy   # delete the environment
+```
+
+The account and region were bootstrapped once with `cdk bootstrap aws://<account-id>/us-east-1`.
+
+Infrastructure and application are deployed separately: CDK creates the empty hosting stack, and the build is uploaded afterwards with `aws s3 sync` (or the pipeline).
+
+**Migration plan.** Dev and prod were built in the console first. Instead of importing them into CDK, each one will be recreated as a new CDK stack, switched over (DNS, certificate, pipeline variables and IAM permissions) and only then the manual resources removed: QA first, then dev, then prod.
 
 ---
 
@@ -182,7 +230,11 @@ aws cloudfront create-invalidation --distribution-id <distribution-id> --paths "
 
 **One IAM role per environment.** The dev role cannot touch prod resources, even if the workflow file is modified, because it is only trusted for `environment:dev`.
 
-**Approval gate on prod, no admin bypass.** Every production deploy, including rollbacks, needs an explicit approval and leaves an audit trail.
+**Approval gate on prod.** GitHub Environment protection rules can require approval for every production deployment.
+
+**One parameterized CDK stack for every environment.** Environments differ only in their name, so they cannot drift apart, and a new one is created with one line instead of repeating console steps.
+
+**Migrate to CDK by recreating, not importing.** Rebuilding each environment as a new stack and switching traffic over is safer than `cdk import` for CloudFront, OAC and bucket policies, and production is never touched until the process is proven on lower environments.
 
 **Shared Cognito and API across environments.** Acceptable for a lab; in a real project dev would have its own User Pool and API to keep test users and data out of production.
 
@@ -198,7 +250,7 @@ Real issues found while building the lab and how they were diagnosed:
 | Certificate not listed in CloudFront | Requested outside `us-east-1` | Request it in `us-east-1` |
 | API returns `401 invalid audience` | Leading spaces in the authorizer's audience | Paste the exact app client ID |
 | `Not authorized to perform sts:AssumeRoleWithWebIdentity` | Trust policy used the old `sub` format; GitHub now includes owner and repo IDs | Read the real `sub` in **CloudTrail** and match it exactly |
-| Prod deploy ran without approval | "Allow administrators to bypass" was enabled on the environment | Disable the bypass |
+| Prod deploy ran without approval | The GitHub `prod` environment has no required reviewer rule | Configure a required reviewer in environment protection rules |
 
 ---
 
@@ -217,11 +269,12 @@ Real issues found while building the lab and how they were diagnosed:
 - [x] CI/CD with GitHub Actions using **OIDC** (no long-lived AWS keys) and least-privilege IAM roles
 - [x] Separate dev and prod environments with a required approval for prod
 - [x] Rollback by redeploying a previous tag or commit
+- [x] Automatic release tag after each successful prod deploy
+- [x] Hosting stack in AWS CDK (qa environment), with security headers
+- [ ] Custom domain and certificate for qa in CDK
+- [ ] Migrate dev and prod to CDK
 - [ ] Lambda versions and aliases for instant API rollback
-- [ ] Automatic release tag after each successful prod deploy
-- [ ] CloudFront response headers policy for security headers (HSTS, X-Frame-Options, etc.)
 - [ ] DynamoDB table behind the Lambda for persistent data
-- [ ] Infrastructure as code with AWS CDK (TypeScript)
 - [ ] CloudWatch alarm on API and Lambda errors
 
 ---
