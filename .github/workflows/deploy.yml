@@ -12,7 +12,7 @@ on:
 
 permissions:
   id-token: write
-  contents: read
+  contents: write
 
 jobs:
   deploy:
@@ -66,3 +66,18 @@ jobs:
           aws cloudfront create-invalidation
           --distribution-id ${{ vars.CF_DISTRIBUTION_ID }}
           --paths "/index.html"
+                
+      - name: Tag release
+        if: github.ref_name == 'main' && !inputs.ref
+        run: |
+          git fetch --tags --force
+          LAST=$(git tag --list 'v*' --sort=-v:refname | head -n 1)
+          if [ -z "$LAST" ]; then
+            NEXT="v1.0.0"
+          else
+            IFS='.' read -r MAJOR MINOR PATCH <<< "${LAST#v}"
+            NEXT="v$MAJOR.$MINOR.$((PATCH + 1))"
+          fi
+          git tag "$NEXT" "${{ github.sha }}"
+          git push origin "$NEXT"
+          echo "### Released $NEXT" >> "$GITHUB_STEP_SUMMARY"
