@@ -19,7 +19,7 @@
     @for (item of d.items; track item.id) {
       <p>
         <span class="badge" [class.ok]="item.hecho" [class.pending]="!item.hecho">
-          {{ item.hecho ? 'Hecho' : 'Pendiente' }}
+          {{ item.hecho ? 'Hecho' : 'Hecho' }}
         </span>
         {{ item.titulo }}
       </p>
