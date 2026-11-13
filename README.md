@@ -271,7 +271,6 @@ Real issues found while building the lab and how they were diagnosed:
 - [x] Rollback by redeploying a previous tag or commit
 - [x] Automatic release tag after each successful prod deploy
 - [x] Hosting stack in AWS CDK (qa environment), with security headers
-- [ ] Custom domain and certificate for qa in CDK
 
 ---
 
