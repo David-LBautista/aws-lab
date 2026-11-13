@@ -4,6 +4,11 @@ on:
   push:
     branches: [main, develop]
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit SHA o tag a desplegar (vacío = último de la rama)'
+        required: false
+        default: ''
 
 permissions:
   id-token: write
@@ -13,12 +18,10 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
-    # main → prod, develop → dev
     environment:
       name: ${{ github.ref_name == 'main' && 'prod' || 'dev' }}
       url: ${{ github.ref_name == 'main' && 'https://lab.davidlucas.dev' || 'https://dev-lab.davidlucas.dev' }}
 
-    # Un deploy a la vez por ambiente
     concurrency:
       group: deploy-${{ github.ref_name }}
       cancel-in-progress: false
@@ -26,6 +29,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - name: Setup Node
         uses: actions/setup-node@v5
