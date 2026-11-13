@@ -1,0 +1,33 @@
+<section class="page-header">
+  <div class="eyebrow">Laboratorio</div>
+  <h1>Angular en AWS</h1>
+  <p>
+    SPA en Angular desplegada en AWS con dominio propio, login con Cognito y una API serverless.
+  </p>
+</section>
+
+<div class="grid">
+  <article class="card">
+    <span class="badge ok">Listo</span>
+    <h3>S3 + CloudFront</h3>
+    <p>Bucket privado servido por CDN con Origin Access Control y caché por tipo de archivo.</p>
+  </article>
+
+  <article class="card">
+    <span class="badge ok">Listo</span>
+    <h3>ACM + Cloudflare DNS</h3>
+    <p>Dominio <code>lab.davidlucas.dev</code> con certificado SSL validado por DNS.</p>
+  </article>
+
+  <article class="card">
+    <span class="badge ok">Listo</span>
+    <h3>Cognito</h3>
+    <p>Registro e inicio de sesión con Authorization Code + PKCE y rutas protegidas con guard.</p>
+  </article>
+
+  <article class="card">
+    <span class="badge pending">En progreso</span>
+    <h3>API Gateway + Lambda</h3>
+    <p>API serverless protegida con el JWT de Cognito.</p>
+  </article>
+</div>

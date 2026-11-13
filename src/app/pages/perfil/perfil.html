@@ -1,0 +1,18 @@
+<section class="page-header">
+  <div class="eyebrow">Cuenta</div>
+  <h1>Perfil</h1>
+</section>
+
+@if (isAuthenticated()) {
+  <div class="card">
+    <p><strong>Correo:</strong> {{ user().email }}</p>
+    <p><strong>Correo verificado:</strong> {{ user().email_verified ? 'Sí' : 'No' }}</p>
+    <p>
+      <strong>ID de usuario (sub):</strong> <code>{{ user().sub }}</code>
+    </p>
+  </div>
+} @else {
+  <div class="card">
+    <p>Inicia sesión para ver los datos de tu cuenta.</p>
+  </div>
+}

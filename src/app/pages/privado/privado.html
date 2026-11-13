@@ -1,0 +1,28 @@
+<section class="page-header">
+  <div class="eyebrow">Ruta protegida</div>
+  <h1>Zona privada</h1>
+  <p>Datos obtenidos de API Gateway + Lambda, enviando tu token de Cognito.</p>
+</section>
+
+<div class="card">
+  @if (loading()) {
+    <p>Cargando…</p>
+  } @else if (error()) {
+    <span class="badge pending">Error</span>
+    <p>{{ error() }}</p>
+  } @else if (data(); as d) {
+    <span class="badge ok">200 OK</span>
+    <p>
+      Usuario según el token: <code>{{ d.usuario }}</code>
+    </p>
+
+    @for (item of d.items; track item.id) {
+      <p>
+        <span class="badge" [class.ok]="item.hecho" [class.pending]="!item.hecho">
+          {{ item.hecho ? 'Hecho' : 'Pendiente' }}
+        </span>
+        {{ item.titulo }}
+      </p>
+    }
+  }
+</div>
