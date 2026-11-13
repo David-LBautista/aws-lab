@@ -2,20 +2,27 @@ name: Deploy to AWS
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch:
 
 permissions:
-  id-token: write # permite pedir el token OIDC a GitHub
+  id-token: write
   contents: read
-
-concurrency:
-  group: deploy-prod
-  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
+    # main → prod, develop → dev
+    environment:
+      name: ${{ github.ref_name == 'main' && 'prod' || 'dev' }}
+      url: ${{ github.ref_name == 'main' && 'https://lab.davidlucas.dev' || 'https://dev-lab.davidlucas.dev' }}
+
+    # Un deploy a la vez por ambiente
+    concurrency:
+      group: deploy-${{ github.ref_name }}
+      cancel-in-progress: false
+
     steps:
       - name: Checkout
         uses: actions/checkout@v5
