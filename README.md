@@ -26,7 +26,7 @@ flowchart LR
     APIGW --> L[Lambda<br/>Node.js]
 ```
 
-Each environment has its own S3 bucket and CloudFront distribution. Prod and dev also use ACM certificates and custom subdomains. Cognito and the API are shared and allow both origins.
+Each environment has its own S3 bucket, CloudFront distribution, ACM certificate and subdomain. Cognito and the API are shared and allow both origins.
 
 | Layer | Service | What it does |
 | --- | --- | --- |
@@ -34,8 +34,8 @@ Each environment has its own S3 bucket and CloudFront distribution. Prod and dev
 | CDN | **Amazon CloudFront** | Serves the app over HTTPS from edge locations; the only reader of the bucket via **Origin Access Control (OAC)**. |
 | TLS | **AWS Certificate Manager (ACM)** | Free, auto-renewing certificates issued in `us-east-1` (required by CloudFront) and validated through DNS. |
 | DNS | **Cloudflare** | `CNAME` records for ACM validation and for routing each subdomain to its CloudFront distribution (DNS only, not proxied). |
-| Auth | **Amazon Cognito** | User Pool with sign-up / sign-in, email verification and Managed Login pages. Public app client (no secret) using **Authorization Code + PKCE**. |
-| API | **Amazon API Gateway (HTTP API)** | `GET /items` route with a **JWT authorizer** backed by Cognito and CORS restricted to the app origins. |
+| Auth | **Amazon Cognito** | Invite-only User Pool (self-service sign-up disabled) with sign-in and Managed Login pages. Public app client (no secret) using **Authorization Code + PKCE**. |
+| API | **Amazon API Gateway (HTTP API)** | `GET /items` route with a **JWT authorizer** backed by Cognito, CORS restricted to the app origins and stage-level **throttling**. |
 | Compute | **AWS Lambda** | Node.js function that returns data and reads the already-validated token claims. |
 | CI/CD | **GitHub Actions + IAM OIDC** | Builds and deploys on push using short-lived credentials, with one IAM role per environment. |
 | Access | **AWS IAM** | Root account with MFA and no access keys; daily work with an IAM admin user; least-privilege roles for the pipeline and Lambda. |
@@ -52,11 +52,14 @@ Each environment has its own S3 bucket and CloudFront distribution. Prod and dev
 - **Protected routes:** `/privado` uses a guard that redirects to Cognito Managed Login when there is no session.
 - **HTTP interceptor:** attaches the access token only to requests that target the API (`secureRoutes`), never to third-party URLs.
 - **Serverless API:** API Gateway rejects missing or invalid tokens with `401` before Lambda runs.
+- **Throttling:** the API stage is limited to 5 requests per second with a burst of 10; extra requests get `429 Too Many Requests`, which protects against abuse and unexpected costs.
+- **Invite-only access:** self-service sign-up is disabled in Cognito; users are created by an administrator.
+- **Centralized configuration:** Cognito and API settings live in Angular environment files instead of being hardcoded in components.
 - **Keyless CI/CD:** GitHub Actions assumes an IAM role through OIDC; no AWS access keys are stored anywhere.
-- **Dev and prod environments:** `develop` deploys to dev automatically; `main` deploys to prod after GitHub Environment approval is configured.
-- **Rollback:** a manual workflow run can redeploy a previous tag or commit.
+- **Dev and prod environments:** `develop` deploys to dev automatically; `main` deploys to prod only after a required reviewer approves.
+- **Rollback:** a manual workflow run can redeploy any previous tag or commit through the same approval gate.
 - **Automatic release tags:** every successful prod deploy creates the next semantic version tag (`v1.0.2`, `v1.0.3`, …).
-- **Infrastructure as code:** the QA hosting layer (S3 + CloudFront + OAC) is defined in AWS CDK and parameterized by environment.
+- **Infrastructure as code:** the hosting layer (S3 + CloudFront + OAC) is defined once in AWS CDK and parameterized by environment.
 - **Modern Angular:** standalone components, signals and `computed` for session state, new control flow (`@if`, `@for`), zoneless change detection.
 
 ---
@@ -82,6 +85,9 @@ infra/                       # AWS CDK app (own package.json)
 ├── bin/infra.ts             # Entry point: one stack per environment
 └── lib/infra-stack.ts       # Hosting stack: private S3 bucket + CloudFront + OAC
 src/
+├── environments/
+│   ├── environment.ts              # Config used by ng build (pipeline)
+│   └── environment.development.ts  # Config used by ng serve
 ├── app/
 │   ├── app.config.ts        # Router, HttpClient + auth interceptor, OIDC config
 │   ├── app.routes.ts        # Routes; /privado protected by autoLoginPartialRoutesGuard
@@ -104,7 +110,7 @@ npm install
 ng serve
 ```
 
-Open http://localhost:4200. `http://localhost:4200` is registered in Cognito as an allowed callback and sign-out URL, and in the API CORS configuration.
+Open http://localhost:4200. Local settings come from `src/environments/environment.development.ts`. `http://localhost:4200` is registered in Cognito as an allowed callback and sign-out URL, and in the API CORS configuration.
 
 ---
 
@@ -113,7 +119,7 @@ Open http://localhost:4200. `http://localhost:4200` is registered in Cognito as 
 ```mermaid
 flowchart LR
     D[push to develop] --> BD[Build] --> DEV[Deploy to dev<br/>dev-lab.davidlucas.dev]
-    PR[PR develop → main] --> M[merge to main] --> BP[Build] --> A{Approval<br/>GitHub Environment} -->|approved| PROD[Deploy to prod<br/>lab.davidlucas.dev]
+    PR[PR develop → main] --> M[merge to main] --> BP[Build] --> A{Approval<br/>required reviewer} -->|approved| PROD[Deploy to prod<br/>lab.davidlucas.dev]
 ```
 
 The workflow ([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)) runs on every push to `develop` or `main` and picks the environment from the branch:
@@ -121,17 +127,17 @@ The workflow ([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)) ru
 | | dev | prod |
 | --- | --- | --- |
 | Branch allowed to deploy | `develop` | `main` |
-| Approval | None | Configure a required reviewer in the GitHub `prod` environment |
+| Approval | None | Required reviewer (admins cannot bypass) |
 | IAM role | `github-actions-aws-lab-dev` | `github-actions-aws-lab-deploy` |
 | Variables | Its own bucket, distribution and role ARN | Its own bucket, distribution and role ARN |
 
-**Pipeline steps:** checkout → `npm ci` → `ng build` → assume the IAM role with OIDC → upload hashed assets with long-lived caching → upload `index.html` with `no-cache` → invalidate `/index.html` in CloudFront. Successful prod deploys also create a release tag.
+**Pipeline steps:** checkout → `npm ci` → `ng build` → assume the IAM role with OIDC → upload hashed assets with long-lived caching → upload `index.html` with `no-cache` → invalidate `/index.html` in CloudFront.
 
 Only `index.html` is invalidated: every other file has a content hash in its name, so a new build produces new file names.
 
 ### Authentication with OIDC
 
-GitHub Actions requests a signed OIDC token and exchanges it with AWS STS for temporary credentials (valid for one hour). Each role's trust policy should only accept tokens from this repository **and** its environment:
+GitHub Actions requests a signed OIDC token and exchanges it with AWS STS for temporary credentials (valid for one hour). Each role's trust policy only accepts tokens from this repository **and** its environment:
 
 ```json
 "Condition": {
@@ -150,14 +156,14 @@ Every stable prod release is tagged (`v1.0.0`, `v1.0.1`, …). To roll back:
 
 1. **Actions → Deploy to AWS → Run workflow**, from the `main` branch.
 2. Enter the tag or commit SHA to deploy (for example `v1.0.0`).
-3. Approve the prod deployment if the `prod` GitHub Environment has required reviewers.
+3. Approve the prod deployment.
 4. Fix forward in the code with `git revert` and a new PR, so `main` matches what is running in production.
 
 The deployment history (**Deployments → prod**) records every deploy with its commit, approver and timestamp.
 
 ### Release tags
 
-After a successful prod deploy, the workflow finds the highest `v*` tag, bumps the patch number and pushes the new tag. Manual runs with a `ref` do not create tags, because they redeploy a version that is already tagged.
+After a successful prod deploy, the workflow finds the highest `v*` tag, bumps the patch number and pushes the new tag. Rollbacks (manual runs with a `ref`) do not create tags, because they redeploy a version that is already tagged.
 
 ### Manual deployment (reference)
 
@@ -180,8 +186,6 @@ The `infra/` folder is an AWS CDK app in TypeScript. One reusable stack defines 
 ```typescript
 new InfraStack(app, 'AwsLab-Qa-Hosting', { env, envName: 'qa' });
 ```
-
-The current entry point deploys the QA stack. Dev and prod are commented examples and are still managed in the AWS console.
 
 The stack creates:
 
@@ -206,7 +210,7 @@ The account and region were bootstrapped once with `cdk bootstrap aws://<account
 
 Infrastructure and application are deployed separately: CDK creates the empty hosting stack, and the build is uploaded afterwards with `aws s3 sync` (or the pipeline).
 
-**Migration plan.** Dev and prod were built in the console first. Instead of importing them into CDK, each one will be recreated as a new CDK stack, switched over (DNS, certificate, pipeline variables and IAM permissions) and only then the manual resources removed: QA first, then dev, then prod.
+**Migration plan.** dev and prod were built in the console first. Instead of importing them into CDK, each one will be recreated as a new CDK stack, switched over (DNS, certificate, pipeline variables and IAM permissions) and only then the manual resources removed: qa first, then dev, then prod.
 
 ---
 
@@ -224,13 +228,19 @@ Infrastructure and application are deployed separately: CDK creates the empty ho
 
 **Authorization at the gateway.** API Gateway validates signature, issuer, expiry and audience (`client_id`). Invalid requests never reach Lambda, so they cost nothing and the function only receives trusted claims.
 
+**Public configuration in environment files.** The Cognito client ID, domain and API URL are not secrets: in a SPA everything shipped to the browser is public. Security comes from PKCE, the allowed callback URLs in Cognito and JWT validation at the API. Keeping these values in `environment.ts` only makes them easier to manage per environment.
+
+**Invite-only users.** Self-service sign-up is disabled so the public demo cannot be used to create arbitrary accounts.
+
+**Throttling at the gateway.** A rate and burst limit on the API stage caps traffic before it reaches Lambda, so a flood of requests cannot run up costs.
+
 **CORS limited to known origins.** Only `http://localhost:4200`, `https://dev-lab.davidlucas.dev` and `https://lab.davidlucas.dev` may call the API, with the `authorization` and `content-type` headers.
 
 **OIDC instead of access keys in CI.** No long-lived credentials to leak or rotate; access is scoped per environment through the token's `sub` claim.
 
 **One IAM role per environment.** The dev role cannot touch prod resources, even if the workflow file is modified, because it is only trusted for `environment:dev`.
 
-**Approval gate on prod.** GitHub Environment protection rules can require approval for every production deployment.
+**Approval gate on prod, no admin bypass.** Every production deploy, including rollbacks, needs an explicit approval and leaves an audit trail.
 
 **One parameterized CDK stack for every environment.** Environments differ only in their name, so they cannot drift apart, and a new one is created with one line instead of repeating console steps.
 
@@ -250,7 +260,7 @@ Real issues found while building the lab and how they were diagnosed:
 | Certificate not listed in CloudFront | Requested outside `us-east-1` | Request it in `us-east-1` |
 | API returns `401 invalid audience` | Leading spaces in the authorizer's audience | Paste the exact app client ID |
 | `Not authorized to perform sts:AssumeRoleWithWebIdentity` | Trust policy used the old `sub` format; GitHub now includes owner and repo IDs | Read the real `sub` in **CloudTrail** and match it exactly |
-| Prod deploy ran without approval | The GitHub `prod` environment has no required reviewer rule | Configure a required reviewer in environment protection rules |
+| Prod deploy ran without approval | "Allow administrators to bypass" was enabled on the environment | Disable the bypass |
 
 ---
 
@@ -259,7 +269,9 @@ Real issues found while building the lab and how they were diagnosed:
 - Root user protected with MFA and without access keys.
 - Day-to-day work with an IAM user; AWS CLI authenticated with temporary credentials (`aws login`).
 - CI/CD uses OIDC and least-privilege roles scoped to one repository, one environment, one bucket and one distribution.
-- No secrets in this repository: the Cognito client ID, user pool ID and API URL are public by design in a SPA.
+- No secrets in this repository: the Cognito client ID, user pool ID and API URL are public by design in a SPA and are kept in environment files.
+- Cognito sign-up is invite-only; new users are created by an administrator.
+- API Gateway throttling (5 req/s, burst 10) limits abuse and cost exposure.
 - Budget alert configured to track credit and cost usage.
 
 ---
@@ -271,10 +283,14 @@ Real issues found while building the lab and how they were diagnosed:
 - [x] Rollback by redeploying a previous tag or commit
 - [x] Automatic release tag after each successful prod deploy
 - [x] Hosting stack in AWS CDK (qa environment), with security headers
+- [ ] Custom domain and certificate for qa in CDK
+- [x] Config moved to Angular environment files
+- [x] Invite-only Cognito user pool
+- [x] API Gateway throttling
 
 ---
 
 ## Author
 
-**David Lucas Bautista** — Senior Software Engineer  
+**David Lucas Bautista** — Senior Software Engineer
 [davidlucas.dev](https://davidlucas.dev) · [LinkedIn](https://linkedin.com/in/david-lb)

@@ -1,7 +1,6 @@
 import { Component, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-
-const API_URL = 'https://jfg2mp6sgj.execute-api.us-east-1.amazonaws.com';
+import { environment } from '../../../environments/environment';
 
 interface Item {
   id: number;
@@ -26,7 +25,7 @@ export class Privado {
   loading = signal(true);
 
   constructor() {
-    this.http.get<ItemsResponse>(`${API_URL}/items`).subscribe({
+    this.http.get<ItemsResponse>(`${environment.apiUrl}/items`).subscribe({
       next: (res) => {
         this.data.set(res);
         this.loading.set(false);
