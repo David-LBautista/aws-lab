@@ -1,9 +1,7 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
 import { OidcSecurityService } from 'angular-auth-oidc-client';
-
-const COGNITO_DOMAIN = 'https://us-east-1e0svynkcw.auth.us-east-1.amazoncognito.com';
-const CLIENT_ID = '5oj7qo4f1e3oapck7qvuc2af6r';
+import { environment } from '../environments/environment';
 
 @Component({
   selector: 'app-root',
@@ -31,6 +29,7 @@ export class App implements OnInit {
   logout() {
     this.oidc.logoffLocal();
     const back = encodeURIComponent(window.location.origin);
-    window.location.href = `${COGNITO_DOMAIN}/logout?client_id=${CLIENT_ID}&logout_uri=${back}`;
+    window.location.href =
+      `${environment.cognito.domain}/logout?client_id=${environment.cognito.clientId}&logout_uri=${back}`;
   }
 }
