@@ -3,6 +3,9 @@ name: Deploy to AWS
 on:
   push:
     branches: [main, develop]
+    paths:
+      - 'web/**'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch:
     inputs:
       ref:
@@ -32,16 +35,28 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.sha }}
 
+      # Versiones nuevas viven en web/; tags viejos (antes del monorepo) en la raíz
+      - name: Detect app folder
+        run: |
+          if [ -f web/angular.json ]; then
+            echo "APP_DIR=web" >> "$GITHUB_ENV"
+          else
+            echo "APP_DIR=." >> "$GITHUB_ENV"
+          fi
+
       - name: Setup Node
         uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
+          cache-dependency-path: ${{ env.APP_DIR }}/package-lock.json
 
       - name: Install dependencies
+        working-directory: ${{ env.APP_DIR }}
         run: npm ci
 
       - name: Build
+        working-directory: ${{ env.APP_DIR }}
         run: npx ng build
 
       - name: Configure AWS credentials (OIDC)
@@ -51,12 +66,14 @@ jobs:
           aws-region: us-east-1
 
       - name: Upload hashed assets
+        working-directory: ${{ env.APP_DIR }}
         run: >
           aws s3 sync dist/aws-lab/browser s3://${{ vars.S3_BUCKET }}
           --delete --exclude index.html
           --cache-control "public,max-age=31536000,immutable"
 
       - name: Upload index.html
+        working-directory: ${{ env.APP_DIR }}
         run: >
           aws s3 cp dist/aws-lab/browser/index.html s3://${{ vars.S3_BUCKET }}/index.html
           --cache-control "no-cache"
@@ -66,7 +83,7 @@ jobs:
           aws cloudfront create-invalidation
           --distribution-id ${{ vars.CF_DISTRIBUTION_ID }}
           --paths "/index.html"
-                
+
       - name: Tag release
         if: github.ref_name == 'main' && !inputs.ref
         run: |
