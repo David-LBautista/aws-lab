@@ -26,7 +26,10 @@ services:
         condition: service_healthy
 
   web:
-    build: ./web
+    build:
+      context: ./web
+      args:
+        NG_CONFIG: docker
     ports:
       - "4200:80"
 

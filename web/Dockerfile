@@ -8,7 +8,8 @@ RUN npm ci
 
 # Luego el código y el build
 COPY . .
-RUN npx ng build
+ARG NG_CONFIG=production
+RUN npx ng build --configuration=$NG_CONFIG
 
 # ---------- Etapa 2: servir con nginx ----------
 FROM nginx:1.27-alpine
