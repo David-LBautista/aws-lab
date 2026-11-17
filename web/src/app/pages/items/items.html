@@ -1,0 +1,26 @@
+<h2>Items (NestJS + PostgreSQL)</h2>
+
+<form (ngSubmit)="add()">
+  <input
+    name="name"
+    placeholder="Nuevo item"
+    [ngModel]="name()"
+    (ngModelChange)="name.set($event)"
+  />
+  <button type="submit">Agregar</button>
+</form>
+
+@if (error()) {
+  <p class="error">{{ error() }}</p>
+}
+
+<ul>
+  @for (item of items(); track item.id) {
+    <li>
+      {{ item.name }}
+      <button (click)="remove(item.id)">Borrar</button>
+    </li>
+  } @empty {
+    <li>No hay items todavía.</li>
+  }
+</ul>

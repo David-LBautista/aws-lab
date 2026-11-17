@@ -17,6 +17,7 @@ export class App implements OnInit {
   // Signals que expone la librería
   isAuthenticated = computed(() => this.oidc.authenticated().isAuthenticated);
   email = computed(() => this.oidc.userData().userData?.email ?? '');
+  hasItemsApi = !!environment.itemsApiUrl;
 
   ngOnInit() {
     this.oidc.checkAuth().subscribe();
