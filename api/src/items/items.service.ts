@@ -8,16 +8,16 @@ import { CreateItemDto } from './dto/create-item.dto.js';
 export class ItemsService {
   constructor(@InjectRepository(Item) private readonly repo: Repository<Item>) {}
 
-  findAll() {
-    return this.repo.find({ order: { id: 'ASC' } });
+  findAll(ownerSub: string) {
+    return this.repo.find({ where: { ownerSub }, order: { id: 'ASC' } });
   }
 
-  create(dto: CreateItemDto) {
-    return this.repo.save(this.repo.create(dto));
+  create(dto: CreateItemDto, ownerSub: string) {
+    return this.repo.save(this.repo.create({ ...dto, ownerSub }));
   }
 
-  async remove(id: number) {
-    const result = await this.repo.delete(id);
+  async remove(id: number, ownerSub: string) {
+    const result = await this.repo.delete({ id, ownerSub });
     if (!result.affected) throw new NotFoundException(`Item ${id} not found`);
   }
 }

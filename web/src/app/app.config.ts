@@ -18,7 +18,7 @@ export const appConfig: ApplicationConfig = {
         postLogoutRedirectUri: window.location.origin,
         scope: 'openid email phone',
         responseType: 'code',
-        secureRoutes: [environment.apiUrl],
+        secureRoutes: [environment.apiUrl, environment.itemsApiUrl].filter(Boolean),
       },
     }),
   ],

@@ -8,6 +8,9 @@ export class Item {
   @Column({ length: 120 })
   name: string;
 
+  @Column({ length: 64 })
+  ownerSub: string;
+
   @CreateDateColumn()
   createdAt: Date;
 }

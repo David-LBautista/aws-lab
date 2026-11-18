@@ -19,6 +19,8 @@ services:
     environment:
       PORT: 3000
       DATABASE_URL: postgres://lab:lab_password@db:5432/awslab
+      COGNITO_USER_POOL_ID: us-east-1_e0sVyNKCW
+      COGNITO_CLIENT_ID: 5oj7qo4f1e3oapck7qvuc2af6r
     ports:
       - "3000:3000"
     depends_on:
