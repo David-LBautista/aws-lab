@@ -9,6 +9,6 @@ export const routes: Routes = [
   { path: '', component: Home },
   { path: 'perfil', component: Perfil },
   { path: 'privado', component: Privado, canActivate: [autoLoginPartialRoutesGuard] },
-  { path: 'items', component: Items },
+  { path: 'items', component: Items, canActivate: [autoLoginPartialRoutesGuard] },
   { path: '**', redirectTo: '' },
 ];
