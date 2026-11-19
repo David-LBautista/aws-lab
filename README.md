@@ -1,10 +1,13 @@
-﻿# AWS Lab — Angular on AWS
+# AWS Lab — Angular on AWS
+
+[![CI](https://github.com/David-LBautista/aws-lab/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/David-LBautista/aws-lab/actions/workflows/ci.yml)
 
 A production-style monorepo built around an Angular SPA deployed on AWS. It includes:
 
 - a custom domain;
 - Amazon Cognito authentication;
 - a serverless API protected by JWT;
+- unit tests for the front end and the API, run by CI on every pull request;
 - a keyless CI/CD pipeline with separate dev and prod environments;
 - infrastructure as code with AWS CDK.
 
@@ -99,6 +102,8 @@ Inside the Compose network the containers reach each other by service name. That
 
 ### CI/CD and infrastructure
 
+- **Tested on every pull request.** A CI workflow runs the unit tests and the production build of the front end and the API in parallel. `main` only accepts changes whose checks pass.
+- **No deploy with broken tests.** The deploy workflow runs the front-end tests before building, so a failing test stops the release.
 - **Keyless CI/CD.** GitHub Actions assumes an IAM role through OIDC. No AWS access keys are stored anywhere.
 - **Dev and prod environments.** `develop` deploys to dev automatically. `main` deploys to prod only after a required reviewer approves.
 - **Rollback.** A manual workflow run can redeploy any previous tag or commit through the same approval gate.
@@ -131,7 +136,8 @@ Inside the Compose network the containers reach each other by service name. That
 - **Back end:** NestJS, TypeORM, PostgreSQL, `class-validator`, [`aws-jwt-verify`](https://github.com/awslabs/aws-jwt-verify)
 - **Containers:** Docker (multi-stage builds), Docker Compose, nginx
 - **AWS:** S3, CloudFront, ACM, Cognito, API Gateway (HTTP API), Lambda (Node.js), IAM, STS, CloudTrail, CloudWatch Logs
-- **CI/CD:** GitHub Actions, GitHub Environments
+- **Testing:** Vitest (front end and API), Angular `TestBed`, NestJS `Test.createTestingModule`
+- **CI/CD:** GitHub Actions, GitHub Environments, branch protection with required checks
 - **Infrastructure as code:** AWS CDK (TypeScript), AWS CloudFormation
 - **DNS:** Cloudflare
 - **Tooling:** Angular CLI, Nest CLI, AWS CLI v2, Docker Desktop
@@ -143,13 +149,16 @@ Inside the Compose network the containers reach each other by service name. That
 ```
 .github/
 └── workflows/
-    └── deploy.yml               # Build + deploy web to dev or prod, rollback, release tags
+    ├── ci.yml                   # Tests + build of web and api on every PR and push
+    └── deploy.yml               # Test + build + deploy web to dev or prod, rollback, release tags
 web/                             # Angular SPA
 ├── Dockerfile                   # Multi-stage: node build → nginx
 ├── nginx.conf                   # SPA fallback (try_files) + no-cache for index.html
 ├── .dockerignore
 ├── angular.json                 # Includes a "docker" build configuration
 └── src/
+    ├── testing/
+    │   └── oidc-mock.ts         # Fake OidcSecurityService for unit tests (no Cognito, no redirects)
     ├── environments/
     │   ├── environment.ts              # ng build (pipeline): items API disabled
     │   ├── environment.development.ts  # ng serve: items API on localhost:3000
@@ -174,8 +183,9 @@ api/                             # NestJS API
     ├── app.module.ts            # ConfigModule + TypeORM (PostgreSQL)
     ├── auth/
     │   ├── cognito-auth.guard.ts      # Verifies Cognito access tokens
+    │   ├── cognito-auth.guard.spec.ts # Guard tests with aws-jwt-verify mocked
     │   └── current-user.decorator.ts  # @CurrentUser() → token claims
-    └── items/                   # Entity, DTO, service and controller
+    └── items/                   # Entity, DTO, service (+ spec) and controller
 infra/                           # AWS CDK app (own package.json)
 ├── bin/infra.ts                 # Entry point: one stack per environment
 └── lib/infra-stack.ts           # Hosting stack: private S3 bucket + CloudFront + OAC
@@ -243,7 +253,45 @@ In PowerShell, `curl` is an alias for `Invoke-WebRequest`. Use `Invoke-RestMetho
 
 ---
 
+## Testing
+
+Both apps use **Vitest**. The tests run in Node without a browser, a database or a connection to Cognito.
+
+```bash
+cd web && npx ng test --watch=false   # Angular
+cd api && npm test                    # NestJS
+```
+
+| Area | What is tested | How external dependencies are replaced |
+| --- | --- | --- |
+| `App` (web) | Shows **Iniciar sesión** without a session and the logout action with one | `provideOidcMock({ authenticated })` |
+| `Perfil` (web) | Renders the signed-in user's data | `provideOidcMock({ userData })` |
+| `ItemsService` (api) | Lists, creates and deletes **only the current user's items**; returns `404` for another user's item | TypeORM repository replaced with `vi.fn()` spies through `getRepositoryToken(Item)` |
+| `CognitoAuthGuard` (api) | `401` without a header, with a non-Bearer header and with an invalid token; a valid token is accepted and its claims are attached to the request | `aws-jwt-verify` replaced with `vi.mock` |
+
+**Mocking the auth library.** `angular-auth-oidc-client` needs its runtime configuration and would redirect to Cognito, so component tests never use the real service. `web/src/testing/oidc-mock.ts` provides a fake `OidcSecurityService` that exposes the session both as observables (`isAuthenticated$`, `userData$`) and as signals (`authenticated`, `userData`), and lets each test choose whether there is a session.
+
+**Testing rules, not libraries.** The API tests do not check that TypeORM works. They check that the service always asks it for the right thing: every query and delete filters by the owner's Cognito `sub`.
+
+---
+
 ## CI/CD
+
+### Continuous integration
+
+The [`ci.yml`](.github/workflows/ci.yml) workflow runs on every pull request and push to `develop` or `main`:
+
+| Job | Steps |
+| --- | --- |
+| **Web (test, build)** | `npm ci` → `ng test` → `ng build` |
+| **API (test, build)** | `npm ci` → `npm test` → `npm run build` |
+
+- The two jobs run in parallel.
+- A new commit on the same branch cancels the run still in progress (`concurrency`).
+- The workflow only has read access to the repository.
+- Both jobs are **required status checks** on `main`, so a pull request with failing tests cannot be merged into production.
+
+### Deployment
 
 ```mermaid
 flowchart LR
@@ -265,11 +313,12 @@ The workflow ([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)) ru
 1. Checkout.
 2. Detect the app folder.
 3. `npm ci`.
-4. `ng build`.
-5. Assume the IAM role with OIDC.
-6. Upload the hashed assets with long-lived caching.
-7. Upload `index.html` with `no-cache`.
-8. Invalidate `/index.html` in CloudFront.
+4. `ng test` (skipped on rollbacks).
+5. `ng build`.
+6. Assume the IAM role with OIDC.
+7. Upload the hashed assets with long-lived caching.
+8. Upload `index.html` with `no-cache`.
+9. Invalidate `/index.html` in CloudFront.
 
 Only `index.html` is invalidated. Every other file has a content hash in its name, so a new build produces new file names.
 
@@ -434,6 +483,12 @@ Infrastructure and application are deployed separately. CDK creates the empty ho
 
 **Approval gate on prod, no admin bypass.** Every production deploy, including rollbacks, needs an explicit approval and leaves an audit trail.
 
+**Separate CI and deploy workflows.** CI runs on pull requests with read-only permissions and no AWS access. The deploy workflow is the only one that assumes an IAM role, and it runs only on `develop` and `main`. Code from a pull request never gets cloud credentials.
+
+**Tests skipped only on rollbacks.** A rollback redeploys a version that already passed through production, and older tags predate the current test setup. Normal deploys always run the tests before building.
+
+**Run both CI jobs on every change.** Each job takes about a minute, so the workflow does not filter by folder. That keeps the required checks simple: they always report a result, and no change can skip them.
+
 ### Infrastructure as code
 
 **One parameterized CDK stack for every environment.** Environments differ only in their name, so they cannot drift apart, and a new one takes one line instead of repeated console steps.
@@ -476,6 +531,8 @@ Real issues found while building the lab, and how they were diagnosed:
 | `ng serve` fails: port 4200 already in use | The `web` container is publishing `4200` | `docker compose stop web` while developing |
 | `curl -X POST ...` fails in PowerShell | `curl` is an alias of `Invoke-WebRequest` | Use `Invoke-RestMethod` or `curl.exe` |
 | `git add api` stages `node_modules` and `.env` | `nest new --skip-git` does not create a `.gitignore` | Add `api/.gitignore`, unstage, and `git rm --cached` any build output (`*.tsbuildinfo`) |
+| `NG0201: No provider found for StsConfigLoader` in component tests | `TestBed` does not load `app.config.ts`, so the auth library has no configuration | Provide a fake `OidcSecurityService` with `provideOidcMock()` |
+| `this.oidc.authenticated is not a function` in tests | The component reads the session through the library's signal API, and the mock only had observables | Add the `authenticated` and `userData` signals to the mock |
 
 ---
 
@@ -509,6 +566,11 @@ Real issues found while building the lab, and how they were diagnosed:
 - [x] NestJS + PostgreSQL items API, containerized
 - [x] Local stack with Docker Compose (healthchecks, named volume)
 - [x] NestJS API protected with Cognito JWT and per-user ownership
+- [x] Unit tests for the front end and the API (Vitest)
+- [x] CI workflow on every pull request, with required checks on `main`
+- [ ] Front-end tests for `ItemsService` (`HttpTestingController`) and the items page
+- [ ] API end-to-end tests (HTTP + validation + auth)
+- [ ] Coverage report in CI
 - [ ] Push the API image to **Amazon ECR**
 - [ ] Run the API on **ECS Fargate** behind an ALB with HTTPS, with **RDS PostgreSQL** and Secrets Manager (CDK)
 - [ ] CI pipeline for the API (build, scan with Trivy, push to ECR, deploy to ECS)

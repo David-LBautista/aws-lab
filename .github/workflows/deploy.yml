@@ -37,11 +37,12 @@ jobs:
 
       # Versiones nuevas viven en web/; tags viejos (antes del monorepo) en la raíz
       - name: Detect app folder
+        id: app
         run: |
           if [ -f web/angular.json ]; then
-            echo "APP_DIR=web" >> "$GITHUB_ENV"
+            echo "dir=web" >> "$GITHUB_OUTPUT"
           else
-            echo "APP_DIR=." >> "$GITHUB_ENV"
+            echo "dir=." >> "$GITHUB_OUTPUT"
           fi
 
       - name: Setup Node
@@ -49,19 +50,20 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: ${{ env.APP_DIR }}/package-lock.json
+          cache-dependency-path: ${{ steps.app.outputs.dir }}/package-lock.json
 
       - name: Install dependencies
-        working-directory: ${{ env.APP_DIR }}
+        working-directory: ${{ steps.app.outputs.dir }}
         run: npm ci
 
+      # Los rollbacks redespliegan versiones que ya estuvieron en prod
       - name: Test
         if: ${{ !inputs.ref }}
         working-directory: ${{ steps.app.outputs.dir }}
         run: npx ng test --watch=false
-        
+
       - name: Build
-        working-directory: ${{ env.APP_DIR }}
+        working-directory: ${{ steps.app.outputs.dir }}
         run: npx ng build
 
       - name: Configure AWS credentials (OIDC)
@@ -71,14 +73,14 @@ jobs:
           aws-region: us-east-1
 
       - name: Upload hashed assets
-        working-directory: ${{ env.APP_DIR }}
+        working-directory: ${{ steps.app.outputs.dir }}
         run: >
           aws s3 sync dist/aws-lab/browser s3://${{ vars.S3_BUCKET }}
           --delete --exclude index.html
           --cache-control "public,max-age=31536000,immutable"
 
       - name: Upload index.html
-        working-directory: ${{ env.APP_DIR }}
+        working-directory: ${{ steps.app.outputs.dir }}
         run: >
           aws s3 cp dist/aws-lab/browser/index.html s3://${{ vars.S3_BUCKET }}/index.html
           --cache-control "no-cache"
