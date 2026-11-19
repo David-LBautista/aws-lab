@@ -4,14 +4,14 @@ on:
   push:
     branches: [main, develop]
     paths:
-      - "web/**"
-      - ".github/workflows/deploy.yml"
+      - 'web/**'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch:
     inputs:
       ref:
-        description: "Commit SHA o tag a desplegar (vacío = último de la rama)"
+        description: 'Commit SHA o tag a desplegar (vacío = último de la rama)'
         required: false
-        default: ""
+        default: ''
 
 permissions:
   id-token: write
@@ -56,6 +56,7 @@ jobs:
         working-directory: ${{ steps.app.outputs.dir }}
         run: npm ci
 
+      # Los rollbacks redespliegan versiones que ya estuvieron en prod
       - name: Test
         if: ${{ !inputs.ref }}
         working-directory: ${{ steps.app.outputs.dir }}
