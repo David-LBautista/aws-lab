@@ -1,24 +1,29 @@
 import { TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import { App } from './app';
+import { provideOidcMock } from '../testing/oidc-mock';
 
 describe('App', () => {
-  beforeEach(async () => {
+  async function setup(authenticated: boolean) {
     await TestBed.configureTestingModule({
       imports: [App],
-    })
-      .compileComponents();
-  });
+      providers: [provideRouter([]), provideOidcMock({ authenticated })],
+    }).compileComponents();
 
-  it('should create the app', () => {
-    const fixture = TestBed.createComponent(App);
-    const app = fixture.componentInstance;
-    expect(app).toBeTruthy();
-  });
-
-  it('should render title', async () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
-    const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('h1')?.textContent).toContain('Hello, aws-lab');
+    return fixture;
+  }
+
+  it('should create the app', async () => {
+    const fixture = await setup(false);
+    expect(fixture.componentInstance).toBeTruthy();
+  });
+
+  it('shows the logout button when there is a session', async () => {
+    const fixture = await setup(true);
+    const text: string = fixture.nativeElement.textContent;
+    expect(text).toContain('Cerrar sesión');
+    expect(text).not.toContain('Iniciar sesión');
   });
 });
