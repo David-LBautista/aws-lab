@@ -55,6 +55,11 @@ jobs:
         working-directory: ${{ env.APP_DIR }}
         run: npm ci
 
+      - name: Test
+        if: ${{ !inputs.ref }}
+        working-directory: ${{ steps.app.outputs.dir }}
+        run: npx ng test --watch=false
+        
       - name: Build
         working-directory: ${{ env.APP_DIR }}
         run: npx ng build
