@@ -1,88 +1,81 @@
-import { Component, inject, signal } from '@angular/core';
-import { Subscription } from 'rxjs';
-import type { AGUIEvent, RunAgentInput } from '@ag-ui/core';
-import { AgentStreamService } from '../../agents/agent-stream.service';
+import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { CurrencyPipe, JsonPipe, PercentPipe } from '@angular/common';
+import { CreditAgentStore } from '../../agents/credit-agent.store';
+import type { ToolCallView } from '../../agents/agent-run.reducer';
+import type { CheckStatus } from '../../agents/credit.types';
+import { ApplicationForm } from './application-form';
 
 @Component({
   selector: 'app-agente-credito',
-  template: `
-    <section class="page-header">
-      <div class="eyebrow">Agentes</div>
-      <h1>Agente de crédito</h1>
-      <p>Ejecuta un análisis y observa los eventos emitidos en tiempo real.</p>
-    </section>
-
-    <section class="card agent-card">
-      <div class="actions">
-        @if (running()) {
-          <button class="btn ghost" type="button" (click)="stop()">Detener análisis</button>
-        } @else {
-          <button class="btn primary" type="button" (click)="start()">Iniciar análisis</button>
-        }
-        <span class="event-count">{{ events().length }} eventos</span>
-      </div>
-
-      @if (error()) {
-        <p class="error-message" role="alert">{{ error() }}</p>
-      }
-
-      <h2>Actividad del agente</h2>
-      <ol class="event-list">
-        @for (event of events(); track $index) {
-          <li><code>{{ event.type }}</code></li>
-        } @empty {
-          <li class="empty">Los eventos aparecerán aquí al iniciar el análisis.</li>
-        }
-      </ol>
-    </section>
-  `,
-  styles: [`
-    .agent-card { max-width: 780px; }
-    .actions { display: flex; align-items: center; gap: 16px; margin-bottom: 28px; }
-    .event-count { color: var(--muted); font-size: .88rem; }
-    .agent-card h2 { font-size: 1.15rem; }
-    .event-list { display: grid; gap: 8px; max-height: 420px; margin: 0; padding-left: 24px; overflow: auto; }
-    .event-list li { padding: 5px 0; }
-    .event-list .empty { color: var(--muted); }
-    .error-message { padding: 12px 14px; color: var(--danger); background: var(--danger-bg); border-radius: var(--radius-sm); }
-  `],
+  imports: [ApplicationForm, CurrencyPipe, JsonPipe, PercentPipe],
+  providers: [CreditAgentStore],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  templateUrl: './agente-credito.html',
+  styleUrl: './agente-credito.scss',
 })
 export class AgenteCredito {
-  private readonly agent = inject(AgentStreamService);
-  private sub?: Subscription;
+  protected readonly store = inject(CreditAgentStore);
 
-  readonly events = signal<AGUIEvent[]>([]);
-  readonly running = signal(false);
-  readonly error = signal<string | null>(null);
+  protected readonly statusText: Record<string, string> = {
+    idle: 'Listo para analizar',
+    connecting: 'Conectando…',
+    running: 'El agente está analizando',
+    awaiting_approval: 'Esperando tu decisión',
+    done: 'Análisis terminado',
+    error: 'Error',
+    cancelled: 'Detenido',
+  };
 
-  start() {
-    this.events.set([]);
-    this.error.set(null);
-    this.running.set(true);
+  protected readonly stepText: Record<string, string> = {
+    credit_report: 'Buró de crédito',
+    affordability: 'Capacidad de pago',
+    decision: 'Decisión',
+  };
 
-    const input: RunAgentInput = {
-      threadId: crypto.randomUUID(),
-      runId: crypto.randomUUID(),
-      messages: [],
-      tools: [],
-      context: [],
-      state: {},
-      forwardedProps: { mode: 'mock' },
-    };
+  protected readonly toolText: Record<string, string> = {
+    get_credit_report: 'Consultando buró de crédito',
+    calculate_payment: 'Calculando pago mensual',
+    approve_loan: 'Propone emitir el crédito',
+    reject_loan: 'Propone rechazar la solicitud',
+  };
 
-    this.sub = this.agent.run('credit', input).subscribe({
-      next: (event) => this.events.update((list) => [...list, event]),
-      error: (err: unknown) => {
-        this.error.set(err instanceof Error ? err.message : String(err));
-        this.running.set(false);
-      },
-      complete: () => this.running.set(false),
-    });
+  protected readonly applicationStatusText: Record<string, string> = {
+    received: 'Recibida',
+    analyzing: 'En análisis',
+    pending_approval: 'Pendiente de autorización',
+    approved: 'Aprobada',
+    rejected: 'Rechazada',
+    manual_review: 'En revisión manual',
+  };
+
+  protected readonly checkIcon: Record<CheckStatus, string> = {
+    pending: 'En curso',
+    pass: 'Cumple',
+    warn: 'Revisar',
+    fail: 'No cumple',
+  };
+
+  protected toolOutcome(call: ToolCallView): string {
+    if (!call.result) {
+      if (call.status === 'streaming') return 'recibiendo argumentos…';
+      if (call.status === 'called') {
+        return this.store.status() === 'awaiting_approval' ? 'esperando autorización' : 'ejecutando…';
+      }
+      return this.store.status() === 'awaiting_approval' ? 'esperando autorización' : 'pendiente';
+    }
+    try {
+      const result = JSON.parse(call.result);
+      if (result.issued === false) return 'no autorizado';
+      if (result.sentToManualReview) return 'enviado a revisión';
+      if (result.rejected) return 'rechazo confirmado';
+    } catch {
+      // Un resultado que no sea JSON sigue contando como completado.
+    }
+    return call.status === 'completed' ? 'listo' : 'ejecutando…';
   }
 
-  stop() {
-    this.sub?.unsubscribe();
-    this.sub = undefined;
-    this.running.set(false);
+  protected pendingTool(): string | undefined {
+    const id = this.store.interrupt()?.toolCallId;
+    return id ? this.store.toolCalls()[id]?.name : undefined;
   }
 }
