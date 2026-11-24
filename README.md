@@ -9,9 +9,12 @@ A production-style monorepo built around an Angular SPA deployed on AWS. It incl
 - a serverless API protected by JWT;
 - unit tests for the front end and the API, run by CI on every pull request;
 - a keyless CI/CD pipeline with separate dev and prod environments;
-- infrastructure as code with AWS CDK.
+- infrastructure as code with AWS CDK;
+- an **AI credit agent with human-in-the-loop approval**, streamed to the UI over the AG-UI protocol from AWS Lambda.
 
 It also has a containerized **NestJS + PostgreSQL** API that validates the same Cognito tokens and runs locally with **Docker Compose**.
+
+> **AI agent demo:** sign in at https://lab.davidlucas.dev and open **Agente de crédito**. The agent analyzes a loan application step by step (credit report, affordability, decision), streams its reasoning and tool calls live, and pauses for an analyst to approve, adjust or reject before anything irreversible happens. See [AI credit agent](#ai-credit-agent).
 
 | Environment | URL | Branch | Deploy | Infrastructure |
 | --- | --- | --- | --- | --- |
@@ -54,6 +57,27 @@ Each environment has its own S3 bucket, CloudFront distribution, ACM certificate
 | CI/CD | **GitHub Actions + IAM OIDC** | Builds and deploys on push with short-lived credentials and one IAM role per environment. |
 | Access | **AWS IAM** | Root account with MFA and no access keys. Daily work uses an IAM admin user. The pipeline and Lambda use least-privilege roles. |
 
+### AI agents (AWS)
+
+```mermaid
+flowchart LR
+    U[Browser<br/>Angular SPA] -->|POST /api/agents/credit<br/>Bearer access token| APIGW[API Gateway<br/>REST API · STREAM]
+    APIGW -->|Cognito authorizer| COG[Amazon Cognito]
+    APIGW -->|InvokeWithResponseStream| L[Lambda<br/>Node.js 22 · ARM]
+    L -->|AG-UI events over SSE| U
+    L -->|threads + pending approvals| DDB[(DynamoDB<br/>TTL 1 day)]
+    L -->|API key, read once per cold start| SM[Secrets Manager]
+    L -->|tool use| C[Claude API]
+```
+
+| Layer | Service | What it does |
+| --- | --- | --- |
+| API | **API Gateway (REST API)** | `POST /api/agents/{agentId}` with **response streaming** (`responseTransferMode: STREAM`), a **Cognito authorizer**, CORS for the app origins and stage throttling. `GET /api/health` is public. |
+| Compute | **AWS Lambda** | The same agents code that runs locally, bundled with esbuild and wrapped with `awslambda.streamifyResponse`. It writes AG-UI events as Server-Sent Events while the agent runs. |
+| State | **Amazon DynamoDB** | One item per conversation thread: shared state, Claude message history and the pending approval. On-demand billing; items expire after one day (TTL). |
+| Secrets | **AWS Secrets Manager** | Stores the Anthropic API key. The function reads it once per cold start; the key never appears in code, environment variables or the repository. |
+| Access | **Cognito group** | Only users in `agents-claude` can run the agent with Claude. Everyone else can use the free simulated mode. |
+
 ### Local (Docker Compose)
 
 ```mermaid
@@ -64,6 +88,8 @@ flowchart LR
     API -->|verifies JWT with JWKS| COG
     API -->|TypeORM| DB[(db<br/>PostgreSQL 17)]
     DB --- VOL[(db-data volume)]
+    B -->|:8787 /api/agents/credit<br/>SSE stream| AG[agents<br/>Express]
+    AG -->|optional, with ANTHROPIC_API_KEY| C[Claude API]
 ```
 
 | Service | Image | Port | Notes |
@@ -71,6 +97,7 @@ flowchart LR
 | `web` | Built from `web/Dockerfile` (nginx) | `4200 → 80` | Built with the `docker` Angular configuration, so it calls the local API |
 | `api` | Built from `api/Dockerfile` (Node) | `3000` | Starts only after `db` is healthy (`depends_on: service_healthy`) |
 | `db` | `postgres:17-alpine` | `5432` | Data persisted in the `db-data` named volume; healthcheck with `pg_isready` |
+| `agents` | Built from `agents/Dockerfile` (Node) | `8787` | AI agents API (Express + SSE). Simulated mode by default; Claude mode when `ANTHROPIC_API_KEY` is set in the root `.env`. `web` waits until it is healthy |
 
 Inside the Compose network the containers reach each other by service name. That is why the API connects to `db:5432` rather than `localhost`.
 
@@ -128,14 +155,53 @@ Inside the Compose network the containers reach each other by service name. That
   - A user can never list or delete another user's items.
   - Deleting another user's item returns `404`.
 
+### AI credit agent
+
+The **Agente de crédito** page shows how a front end consumes an AI agent: streaming, live agent state and human approval.
+
+**What the user sees**
+
+1. The analyst fills in a loan application (or picks a sample: direct approval, term adjustment, rejection).
+2. The agent works through three steps (**credit report**, **affordability**, **decision**). Its reasoning streams token by token, and each tool call shows its arguments while they are still being generated, then its result.
+3. The application card updates live: credit score, risk checks, rate, monthly payment and debt-to-income ratio.
+4. The agent proposes a decision and **stops**. Nothing is issued or rejected until the analyst clicks **Aprobar**, **Rechazar** or **Enviar a revisión manual**.
+
+**Two interchangeable engines behind the same UI**
+
+| Engine | How it decides | Cost |
+| --- | --- | --- |
+| **Simulado** (mock) | A scripted agent that follows the same rules | Free; default for visitors |
+| **Claude** | Claude chooses which tool to call, which term to try next and what to recommend, and writes its own reasoning | Uses the Anthropic API; restricted to the `agents-claude` Cognito group |
+
+Both emit exactly the same AG-UI events, so the Angular page does not know which one is running.
+
+**Who does what**
+
+| Responsibility | Owner |
+| --- | --- |
+| Decide the next step and explain it | The model (or the scripted mock) |
+| Calculations: rate by score, French amortization, debt-to-income | Deterministic code in `agents/src/credit/domain.ts`. The model never does the math |
+| Business rules: minimum score 600, debt-to-income ≤ 40%, allowed terms | The server. If Claude proposes an approval that breaks a rule, the tool call is returned to it as an error and never reaches the analyst |
+| Irreversible actions (`approve_loan`, `reject_loan`) | The analyst. The run ends with an **interrupt**; a new run with `resume` executes the action with the values the analyst approved |
+
+**AG-UI protocol.** The agent streams standard [AG-UI](https://docs.ag-ui.com) events: `RUN_STARTED`/`RUN_FINISHED`/`RUN_ERROR`, `TEXT_MESSAGE_*`, `TOOL_CALL_START/ARGS/END/RESULT`, `STATE_SNAPSHOT`/`STATE_DELTA` (JSON Patch) and `STEP_STARTED`/`STEP_FINISHED`. A pause is a `RUN_FINISHED` with `outcome: { type: 'interrupt' }`; the answer is a new run carrying `resume: [{ interruptId, payload }]`.
+
+**Angular side**
+
+- `AgentStreamService` posts the `RunAgentInput` with `fetch` (not `EventSource`, which cannot send a POST body or an `Authorization` header) and exposes the SSE stream as an RxJS `Observable`. Unsubscribing aborts the request, which cancels the agent on the server.
+- `applyEvent` is a **pure reducer**: current view + one event → new view. All protocol logic lives there, independent of Angular.
+- `CreditAgentStore` keeps the view in one signal and exposes `computed` slices. Events are batched per animation frame (`bufferTime(0, animationFrameScheduler)`), so hundreds of tokens per second do not trigger hundreds of renders.
+- The application form validates on the client for UX; the server validates again because the browser is not trusted.
+
 ---
 
 ## Tech stack
 
 - **Front end:** Angular, TypeScript, SCSS, [`angular-auth-oidc-client`](https://github.com/damienbod/angular-auth-oidc-client)
 - **Back end:** NestJS, TypeORM, PostgreSQL, `class-validator`, [`aws-jwt-verify`](https://github.com/awslabs/aws-jwt-verify)
+- **AI agents:** Node.js, Express, [AG-UI protocol](https://docs.ag-ui.com) (`@ag-ui/core`), Anthropic SDK (Claude with tool use), Server-Sent Events, `fast-json-patch`, `partial-json`
 - **Containers:** Docker (multi-stage builds), Docker Compose, nginx
-- **AWS:** S3, CloudFront, ACM, Cognito, API Gateway (HTTP API), Lambda (Node.js), IAM, STS, CloudTrail, CloudWatch Logs
+- **AWS:** S3, CloudFront, ACM, Cognito, API Gateway (HTTP API and REST API with response streaming), Lambda (Node.js, response streaming), DynamoDB, Secrets Manager, IAM, STS, CloudTrail, CloudWatch Logs
 - **Testing:** Vitest (front end and API), Angular `TestBed`, NestJS `Test.createTestingModule`
 - **CI/CD:** GitHub Actions, GitHub Environments, branch protection with required checks
 - **Infrastructure as code:** AWS CDK (TypeScript), AWS CloudFormation
@@ -160,20 +226,27 @@ web/                             # Angular SPA
     ├── testing/
     │   └── oidc-mock.ts         # Fake OidcSecurityService for unit tests (no Cognito, no redirects)
     ├── environments/
-    │   ├── environment.ts              # ng build (pipeline): items API disabled
-    │   ├── environment.development.ts  # ng serve: items API on localhost:3000
-    │   └── environment.docker.ts       # docker compose build: items API on localhost:3000
+    │   ├── environment.ts              # ng build (pipeline): items API disabled, agents API on AWS
+    │   ├── environment.development.ts  # ng serve: items API on :3000, agents API on :8787
+    │   └── environment.docker.ts       # docker compose build: items API on :3000, agents API on :8787
     └── app/
         ├── app.config.ts        # Router, HttpClient + auth interceptor, OIDC config (secureRoutes)
         ├── app.routes.ts        # /privado and /items protected by autoLoginPartialRoutesGuard
         ├── app.ts / app.html    # Top bar, login / logout, session state with signals
         ├── services/
         │   └── items.service.ts # Calls the NestJS items API
+        ├── agents/              # AG-UI client
+        │   ├── agent-stream.service.ts  # fetch + SSE → Observable<AGUIEvent>, abort on unsubscribe
+        │   ├── sse.ts                   # Parses SSE frames from text chunks
+        │   ├── agent-run.reducer.ts     # Pure reducer: (view, event) → view (+ spec)
+        │   ├── credit-agent.store.ts    # Signals store: start, respond (resume), stop, engine (+ spec)
+        │   └── credit.types.ts
         └── pages/
             ├── home/            # Overview of the lab
             ├── perfil/          # User data from the ID token
             ├── privado/         # Calls the protected API Gateway + Lambda API
-            └── items/           # CRUD against the NestJS API (per-user items)
+            ├── items/           # CRUD against the NestJS API (per-user items)
+            └── agente-credito/  # AI credit agent: form, live activity, approval
 api/                             # NestJS API
 ├── Dockerfile                   # Multi-stage: build → prune → non-root runtime
 ├── .dockerignore
@@ -186,9 +259,29 @@ api/                             # NestJS API
     │   ├── cognito-auth.guard.spec.ts # Guard tests with aws-jwt-verify mocked
     │   └── current-user.decorator.ts  # @CurrentUser() → token claims
     └── items/                   # Entity, DTO, service (+ spec) and controller
+agents/                          # AI agents API (own package.json)
+├── Dockerfile                   # Multi-stage, non-root, healthcheck
+├── vitest.config.ts
+├── src/
+│   ├── index.ts                 # Express server (local / Docker)
+│   ├── lambda.ts                # Lambda handler with response streaming (AWS)
+│   ├── sse.ts                   # SSE writer for Express
+│   ├── server/prepareRun.ts     # Shared request validation and engine selection
+│   ├── agents/
+│   │   ├── registry.ts          # agentId → { mock, claude }
+│   │   └── types.ts             # AgentContext: input, emit, signal, store
+│   ├── credit/
+│   │   ├── domain.ts            # Credit rules, calculations and input validation
+│   │   ├── creditMockAgent.ts   # Scripted agent (free)
+│   │   └── creditClaudeAgent.ts # Claude agent: tool loop, guardrails, interrupt/resume
+│   └── store/
+│       ├── threadStore.ts       # ThreadStore interface + in-memory implementation
+│       └── dynamoThreadStore.ts # DynamoDB implementation
+└── test/                        # Vitest: domain, both agents, prepareRun, Lambda handler
 infra/                           # AWS CDK app (own package.json)
-├── bin/infra.ts                 # Entry point: one stack per environment
-└── lib/infra-stack.ts           # Hosting stack: private S3 bucket + CloudFront + OAC
+├── bin/infra.ts                 # Entry point: one stack per environment + agents stack
+├── lib/infra-stack.ts           # Hosting stack: private S3 bucket + CloudFront + OAC
+└── lib/agents-stack.ts          # Agents stack: REST API (streaming) + Lambda + DynamoDB + Cognito group
 docker-compose.yml               # web + api + db for local development
 ```
 
@@ -208,6 +301,7 @@ docker compose up --build -d
 | --- | --- |
 | http://localhost:4200 | Angular app (nginx container) |
 | http://localhost:3000/items | NestJS API (requires a Bearer token) |
+| http://localhost:8787/api/health | Agents API (shows whether Claude mode is available) |
 | `localhost:5432` | PostgreSQL (`lab` / `awslab`) |
 
 ```bash
@@ -242,6 +336,22 @@ COGNITO_CLIENT_ID=<app-client-id>
 
 In Docker Compose the same values are set in `docker-compose.yml`, with the host `db` instead of `localhost`. The user pool ID and client ID are public identifiers, not secrets. The database password is a local development value only.
 
+### Agents API (`agents/`)
+
+Simulated mode needs nothing. For Claude mode, create a `.env` file in the **repository root** (it is ignored by Git) with a key from the Claude Console. A Claude Pro subscription does not include API access.
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+CLAUDE_MODEL=claude-haiku-5-5
+```
+
+```bash
+docker compose up -d --build agents web     # or, with hot reload:
+cd agents && npm install && npm run dev     # http://localhost:8787
+```
+
+Locally the agents API keeps threads in memory. Set `THREADS_TABLE` to a DynamoDB table name to use DynamoDB instead.
+
 ### Quick API checks (PowerShell)
 
 ```powershell
@@ -260,6 +370,7 @@ Both apps use **Vitest**. The tests run in Node without a browser, a database or
 ```bash
 cd web && npx ng test --watch=false   # Angular
 cd api && npm test                    # NestJS
+cd agents && npm test                 # AI agents
 ```
 
 | Area | What is tested | How external dependencies are replaced |
@@ -268,8 +379,16 @@ cd api && npm test                    # NestJS
 | `Perfil` (web) | Renders the signed-in user's data | `provideOidcMock({ userData })` |
 | `ItemsService` (api) | Lists, creates and deletes **only the current user's items**; returns `404` for another user's item | TypeORM repository replaced with `vi.fn()` spies through `getRepositoryToken(Item)` |
 | `CognitoAuthGuard` (api) | `401` without a header, with a non-Bearer header and with an invalid token; a valid token is accepted and its claims are attached to the request | `aws-jwt-verify` replaced with `vi.mock` |
+| `applyEvent` (web) | Every AG-UI event type: streamed text, partial tool arguments, JSON Patch without mutation, steps, interrupts, errors | None: it is a pure function |
+| `CreditAgentStore` (web) | `start` sends the application, `respond` resumes the same thread with the interrupt ID, `stop` aborts the request, the engine chosen at start is kept on resume | `AgentStreamService` replaced with a fake that returns RxJS `Subject`s |
+| Credit domain (agents) | Rates by score, amortization, debt-to-income, and input validation with every error collected | None |
+| `creditMockAgent` (agents) | The three paths (approve, adjust term, reject), protocol order, **no irreversible action before approval**, resume outcomes, reused or unknown interrupts rejected | In-memory `ThreadStore` |
+| `creditClaudeAgent` (agents) | Claude decides the steps while the server computes the numbers; guardrails reject rule-breaking approvals and invented terms; resume sends the analyst's decision back to Claude; invalid input never reaches the API | **Fake Claude client** that replays scripted turns with the real streaming event shape: no tokens spent |
+| Lambda handler (agents) | Health and CORS by origin, SSE output until the interrupt, `400` on invalid JSON | `awslambda` runtime global faked, DynamoDB store replaced by the in-memory one |
 
 **Mocking the auth library.** `angular-auth-oidc-client` needs its runtime configuration and would redirect to Cognito, so component tests never use the real service. `web/src/testing/oidc-mock.ts` provides a fake `OidcSecurityService` that exposes the session both as observables (`isAuthenticated$`, `userData$`) and as signals (`authenticated`, `userData`), and lets each test choose whether there is a session.
+
+**Injecting the model client.** `createCreditClaudeAgent(getClient)` receives the Anthropic client instead of creating it, so tests pass a fake that streams scripted responses. The agent loop, the guardrails and the interrupt are tested without network access or API costs.
 
 **Testing rules, not libraries.** The API tests do not check that TypeORM works. They check that the service always asks it for the right thing: every query and delete filters by the owner's Cognito `sub`.
 
@@ -427,6 +546,28 @@ cdk deploy    # create or update the stack
 cdk destroy   # delete the environment
 ```
 
+### Agents stack (`AwsLabAgents`)
+
+A separate stack, so deploying or destroying it never touches the hosting stacks:
+
+| Resource | Configuration |
+| --- | --- |
+| DynamoDB table | Partition key `threadId`, on-demand billing, TTL on `expiresAt` |
+| Lambda function | Node.js 22 on ARM, 512 MB, 5-minute timeout, bundled from `agents/src/lambda.ts` with esbuild (AWS SDK left to the runtime), one-week log retention |
+| REST API | `GET /api/health` (public) and `POST /api/agents/{agentId}` (Cognito authorizer with the `openid` scope, so it accepts access tokens), both with `responseTransferMode: STREAM`; throttling 5 req/s, burst 10; CORS preflight and CORS headers on 4XX/5XX gateway responses |
+| Cognito | Imports the existing User Pool and creates the `agents-claude` group |
+| IAM | The function can only read/write its table and read its secret |
+
+The Anthropic key is created once, outside the code:
+
+```bash
+aws secretsmanager create-secret --name aws-lab/anthropic-api-key --secret-string "sk-ant-..."
+cd infra && npx cdk deploy AwsLabAgents
+aws cognito-idp admin-add-user-to-group --user-pool-id <pool-id> --username <username> --group-name agents-claude
+```
+
+The `AgentsApiUrl` output goes into `agentsApiUrl` in `web/src/environments/environment.ts`.
+
 The account and region were bootstrapped once with `cdk bootstrap aws://<account-id>/us-east-1`.
 
 Infrastructure and application are deployed separately. CDK creates the empty hosting stack, and the build is uploaded afterwards with `aws s3 sync` or by the pipeline.
@@ -513,6 +654,34 @@ Infrastructure and application are deployed separately. CDK creates the empty ho
 
 **`synchronize: true` only for local development.** TypeORM creates the schema automatically in the lab. A deployed environment would use migrations instead.
 
+### AI agents
+
+**AG-UI instead of a custom event format.** It is an open protocol for agent-to-UI communication, so the same front end could talk to other agent frameworks, and the event types already cover streaming text, tool calls, shared state and interrupts.
+
+**SSE over `fetch`, not WebSockets.** Each run is a request with a streamed response. SSE works through API Gateway and CloudFront, needs no connection management, and a stop is just an aborted request.
+
+**REST API instead of HTTP API for the agents.** Response streaming is only supported on API Gateway REST APIs. The items API stays on the cheaper HTTP API.
+
+**The model orchestrates; code calculates and enforces.** Claude chooses tools and explains its reasoning. Rates, payments and ratios come from deterministic functions, and the server re-validates every proposal before an analyst sees it. A wrong or manipulated model output cannot approve a loan that breaks the rules.
+
+**Human approval enforced by the server.** Irreversible tools are intercepted and never executed in the run that proposes them. The proposal is stored with an interrupt ID; only a resume with that ID executes it, once.
+
+**Interrupts end the run.** The server does not hold a connection open while a person decides. State lives in the `ThreadStore`, so an approval can come minutes later, from another Lambda instance.
+
+**Dependency inversion for storage.** Agents depend on a `ThreadStore` interface. Local development and tests inject the in-memory store, AWS injects `DynamoThreadStore`, and no agent code changed for the deployment.
+
+**Open/closed agent registry.** `registry.ts` maps an agent ID to its mock and Claude versions. Adding an agent is one entry; the server and the Lambda handler stay unchanged.
+
+**One validation path for Express and Lambda.** `prepareRun` validates the request and picks the engine for both transports, so local and cloud behave the same.
+
+**Claude restricted by Cognito group.** The demo is public, but model calls cost money. The engine choice is checked on the server against the token's groups, not hidden in the UI.
+
+**Key in Secrets Manager, read once per container.** The key is fetched on cold start and cached for the life of the container, which keeps it out of environment variables and keeps request latency low.
+
+**Lambda abort before timeout.** Lambda does not report a closed client connection, so the handler aborts the agent five seconds before the function timeout and closes the stream with a `RUN_ERROR` instead of being cut off.
+
+**Batched rendering in Angular.** Applying events once per animation frame keeps the UI smooth when tokens arrive faster than the screen refreshes.
+
 ---
 
 ## Troubleshooting notes
@@ -533,6 +702,12 @@ Real issues found while building the lab, and how they were diagnosed:
 | `git add api` stages `node_modules` and `.env` | `nest new --skip-git` does not create a `.gitignore` | Add `api/.gitignore`, unstage, and `git rm --cached` any build output (`*.tsbuildinfo`) |
 | `NG0201: No provider found for StsConfigLoader` in component tests | `TestBed` does not load `app.config.ts`, so the auth library has no configuration | Provide a fake `OidcSecurityService` with `provideOidcMock()` |
 | `this.oidc.authenticated is not a function` in tests | The component reads the session through the library's signal API, and the mock only had observables | Add the `authenticated` and `userData` signals to the mock |
+| `git add agents` stages `node_modules` even with a `.gitignore` | The file was created with PowerShell `echo`, which writes UTF-16; Git could not read it | Recreate it with `Set-Content -Encoding ascii` and check with `git check-ignore -v` |
+| "La API de agentes no está configurada" in the Docker build | `agentsApiUrl` was empty in `environment.docker.ts` | Set it to `http://localhost:8787`; the browser calls the agents API directly, not the container network |
+| `Cannot GET /` on the agents API | Only `/api/*` routes existed | Added a `GET /` index route; `/api/health` is the real check |
+| Tool card stayed on "esperando autorización" after a rejection | The rejected tool call never got a result event | Every proposed tool call now ends with a `TOOL_CALL_RESULT`, even when it is not executed (the Claude API also requires one `tool_result` per `tool_use`) |
+| Claude's replies showed `**` asterisks | The model wrote Markdown and the UI renders plain text | Ask for plain text in the system prompt |
+| Claude tried a term shorter than the one requested | The prompt listed fixed terms | The server sends the allowed terms for each application, and rejects any other term |
 
 ---
 
@@ -547,35 +722,46 @@ Real issues found while building the lab, and how they were diagnosed:
 - Both APIs reject requests without a valid Cognito access token. The NestJS API also enforces per-user ownership of data.
 - The API container runs as a non-root user, and both images are rebuilt from patched base images.
 - A budget alert tracks credit and cost usage.
+- The Anthropic API key lives only in Secrets Manager (AWS) and in an ignored root `.env` (local). The Lambda role can read that one secret and nothing else.
+- Claude mode requires membership in the `agents-claude` Cognito group, checked on the server; a spending limit is also set in the Claude Console.
+- Agent input from the browser is validated on the server before any model call, and model proposals are re-validated against the business rules before a person sees them.
+- Agent threads expire from DynamoDB after one day.
 
 ---
 
 ## Roadmap
 
+### Done
+
+**Hosting and delivery**
+- [x] Static hosting on S3 + CloudFront with OAC, custom domain and ACM certificates
 - [x] CI/CD with GitHub Actions using **OIDC** (no long-lived AWS keys) and least-privilege IAM roles
 - [x] Separate dev and prod environments with a required approval for prod
-- [x] Rollback by redeploying a previous tag or commit
-- [x] Automatic release tag after each successful prod deploy
+- [x] Rollback by redeploying a previous tag or commit, and an automatic release tag after each prod deploy
 - [x] Hosting stack in AWS CDK (qa environment), with security headers
-- [ ] Custom domain and certificate for qa in CDK
-- [x] Config moved to Angular environment files
-- [x] Invite-only Cognito user pool
-- [x] API Gateway throttling
-- [x] Monorepo (`web/`, `api/`, `infra/`) with path-filtered pipeline
-- [x] Dockerized front end (multi-stage build + nginx)
-- [x] NestJS + PostgreSQL items API, containerized
-- [x] Local stack with Docker Compose (healthchecks, named volume)
-- [x] NestJS API protected with Cognito JWT and per-user ownership
-- [x] Unit tests for the front end and the API (Vitest)
-- [x] CI workflow on every pull request, with required checks on `main`
-- [ ] Front-end tests for `ItemsService` (`HttpTestingController`) and the items page
-- [ ] API end-to-end tests (HTTP + validation + auth)
-- [ ] Coverage report in CI
-- [ ] Push the API image to **Amazon ECR**
-- [ ] Run the API on **ECS Fargate** behind an ALB with HTTPS, with **RDS PostgreSQL** and Secrets Manager (CDK)
-- [ ] CI pipeline for the API (build, scan with Trivy, push to ECR, deploy to ECS)
-- [ ] TypeORM migrations instead of `synchronize`
-- [ ] CloudWatch alarm on API errors
+
+**Security and APIs**
+- [x] Invite-only Cognito user pool and configuration in Angular environment files
+- [x] Serverless API with a JWT authorizer and API Gateway throttling
+- [x] NestJS + PostgreSQL items API protected with Cognito JWT and per-user ownership
+
+**Monorepo, containers and tests**
+- [x] Monorepo (`web/`, `api/`, `infra/`, `agents/`) with a path-filtered pipeline
+- [x] Dockerized front end and APIs (multi-stage builds), local stack with Docker Compose
+- [x] Unit tests with Vitest and a CI workflow on every pull request, with required checks on `main`
+
+**AI agents**
+- [x] AI credit agent with human-in-the-loop approval over the AG-UI protocol (Angular + Node.js)
+- [x] Claude engine with tool use and server-side guardrails, tested with a fake client
+- [x] Agents API on Lambda with response streaming, DynamoDB threads, Cognito authorizer and Secrets Manager (CDK)
+
+### Next
+
+- **Agents in CI:** run the agents tests on every pull request and deploy the agents stack from the pipeline.
+- [x] Agents API CORS includes `https://dev-lab.davidlucas.dev` (deployment and end-to-end verification in progress).
+- **React version:** a legal-themed front end that reuses the same agents API.
+- **NestJS API on AWS:** image in ECR with a Trivy scan, ECS Fargate behind an ALB, RDS PostgreSQL and Secrets Manager, all in CDK; TypeORM migrations instead of `synchronize`.
+- **Quality and operations:** front-end tests for the items page, API end-to-end tests, coverage report in CI and CloudWatch alarms on API errors.
 
 ---
 
