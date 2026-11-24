@@ -7,7 +7,7 @@ A production-style monorepo built around an Angular SPA deployed on AWS. It incl
 - a custom domain;
 - Amazon Cognito authentication;
 - a serverless API protected by JWT;
-- unit tests for the front end and the API, run by CI on every pull request;
+- unit tests for the front end, APIs, agents and infrastructure, run by CI on every pull request;
 - a keyless CI/CD pipeline with separate dev and prod environments;
 - infrastructure as code with AWS CDK;
 - an **AI credit agent with human-in-the-loop approval**, streamed to the UI over the AG-UI protocol from AWS Lambda.
@@ -129,7 +129,7 @@ Inside the Compose network the containers reach each other by service name. That
 
 ### CI/CD and infrastructure
 
-- **Tested on every pull request.** A CI workflow runs the unit tests and the production build of the front end and the API in parallel. `main` only accepts changes whose checks pass.
+- **Tested on every pull request.** A CI workflow runs the unit tests and builds for the front end, APIs and agents, plus infrastructure assertions and a CDK synth. `main` only accepts changes whose checks pass.
 - **No deploy with broken tests.** The deploy workflow runs the front-end tests before building, so a failing test stops the release.
 - **Keyless CI/CD.** GitHub Actions assumes an IAM role through OIDC. No AWS access keys are stored anywhere.
 - **Dev and prod environments.** `develop` deploys to dev automatically. `main` deploys to prod only after a required reviewer approves.
@@ -202,7 +202,7 @@ Both emit exactly the same AG-UI events, so the Angular page does not know which
 - **AI agents:** Node.js, Express, [AG-UI protocol](https://docs.ag-ui.com) (`@ag-ui/core`), Anthropic SDK (Claude with tool use), Server-Sent Events, `fast-json-patch`, `partial-json`
 - **Containers:** Docker (multi-stage builds), Docker Compose, nginx
 - **AWS:** S3, CloudFront, ACM, Cognito, API Gateway (HTTP API and REST API with response streaming), Lambda (Node.js, response streaming), DynamoDB, Secrets Manager, IAM, STS, CloudTrail, CloudWatch Logs
-- **Testing:** Vitest (front end and API), Angular `TestBed`, NestJS `Test.createTestingModule`
+- **Testing:** Vitest (front end, APIs and agents), Angular `TestBed`, NestJS `Test.createTestingModule`, Jest and CDK assertions (infrastructure)
 - **CI/CD:** GitHub Actions, GitHub Environments, branch protection with required checks
 - **Infrastructure as code:** AWS CDK (TypeScript), AWS CloudFormation
 - **DNS:** Cloudflare
@@ -371,6 +371,8 @@ Both apps use **Vitest**. The tests run in Node without a browser, a database or
 cd web && npx ng test --watch=false   # Angular
 cd api && npm test                    # NestJS
 cd agents && npm test                 # AI agents
+cd infra && npm test                  # CDK template assertions
+npx cdk synth --quiet                 # run from infra/ after installing agents and infra dependencies
 ```
 
 | Area | What is tested | How external dependencies are replaced |
@@ -385,6 +387,7 @@ cd agents && npm test                 # AI agents
 | `creditMockAgent` (agents) | The three paths (approve, adjust term, reject), protocol order, **no irreversible action before approval**, resume outcomes, reused or unknown interrupts rejected | In-memory `ThreadStore` |
 | `creditClaudeAgent` (agents) | Claude decides the steps while the server computes the numbers; guardrails reject rule-breaking approvals and invented terms; resume sends the analyst's decision back to Claude; invalid input never reaches the API | **Fake Claude client** that replays scripted turns with the real streaming event shape: no tokens spent |
 | Lambda handler (agents) | Health and CORS by origin, SSE output until the interrupt, `400` on invalid JSON | `awslambda` runtime global faked, DynamoDB store replaced by the in-memory one |
+| `AgentsStack` (infra) | API Gateway streaming, Cognito auth, throttling, DynamoDB TTL, secret permissions, Claude group and CORS | Synthesized CloudFormation template; no AWS credentials |
 
 **Mocking the auth library.** `angular-auth-oidc-client` needs its runtime configuration and would redirect to Cognito, so component tests never use the real service. `web/src/testing/oidc-mock.ts` provides a fake `OidcSecurityService` that exposes the session both as observables (`isAuthenticated$`, `userData$`) and as signals (`authenticated`, `userData`), and lets each test choose whether there is a session.
 
@@ -404,8 +407,10 @@ The [`ci.yml`](.github/workflows/ci.yml) workflow runs on every pull request and
 | --- | --- |
 | **Web (test, build)** | `npm ci` → `ng test` → `ng build` |
 | **API (test, build)** | `npm ci` → `npm test` → `npm run build` |
+| **Agents (test, build)** | `npm ci` → `npm test` → `npm run build` |
+| **Infra (test, synth)** | Install agents and infra dependencies → `npm test` → `cdk synth` |
 
-- The two jobs run in parallel.
+- The four jobs run in parallel; the infra job installs agents dependencies because CDK bundles the Lambda from `agents/`.
 - A new commit on the same branch cancels the run still in progress (`concurrency`).
 - The workflow only has read access to the repository.
 - Both jobs are **required status checks** on `main`, so a pull request with failing tests cannot be merged into production.
@@ -754,10 +759,11 @@ Real issues found while building the lab, and how they were diagnosed:
 - [x] AI credit agent with human-in-the-loop approval over the AG-UI protocol (Angular + Node.js)
 - [x] Claude engine with tool use and server-side guardrails, tested with a fake client
 - [x] Agents API on Lambda with response streaming, DynamoDB threads, Cognito authorizer and Secrets Manager (CDK)
+- [x] Agents tests and CDK template assertions run in CI as required checks
 
 ### Next
 
-- **Agents in CI:** run the agents tests on every pull request and deploy the agents stack from the pipeline.
+- **Agents deploy from the pipeline:** deploy the agents stack from GitHub Actions with OIDC and least-privilege permissions.
 - [x] Agents API CORS includes `https://dev-lab.davidlucas.dev` (deployment and end-to-end verification in progress).
 - **React version:** a legal-themed front end that reuses the same agents API.
 - **NestJS API on AWS:** image in ECR with a Trivy scan, ECS Fargate behind an ALB, RDS PostgreSQL and Secrets Manager, all in CDK; TypeORM migrations instead of `synchronize`.
