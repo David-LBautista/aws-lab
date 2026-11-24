@@ -16,10 +16,15 @@ const app = express();
 app.use(cors({ origin: ['http://localhost:4200', 'http://localhost:5173'] }));
 app.use(express.json({ limit: '1mb' }));
 
+app.get('/', (_req, res) => {
+  res.json({ name: 'agents-api', health: '/api/health', run: 'POST /api/agents/:agentId' });
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, defaultMode, claudeAvailable, agents: Object.keys(agents) });
 });
 
+// Endpoint AG-UI: recibe un RunAgentInput (POST) y responde con un stream SSE de eventos.
 app.post('/api/agents/:agentId', async (req, res) => {
   const entry = agents[req.params.agentId];
   if (!entry) {
@@ -40,10 +45,15 @@ app.post('/api/agents/:agentId', async (req, res) => {
     res.status(400).json({ error: 'Claude mode needs ANTHROPIC_API_KEY' });
     return;
   }
-  const agent = mode === 'claude' ? entry.claude : entry.mock;
+  if (mode === 'claude' && !entry.claude) {
+    res.status(400).json({ error: `Agent "${req.params.agentId}" has no Claude version yet` });
+    return;
+  }
+  const agent = mode === 'claude' ? entry.claude! : entry.mock;
 
   const sse = new SseWriter(res);
   const controller = new AbortController();
+  // Si el navegador cierra la conexión (Stop, recarga, pestaña cerrada) cancelamos el agente.
   res.on('close', () => controller.abort());
   const heartbeat = setInterval(() => sse.heartbeat(), 15_000);
 
