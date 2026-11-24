@@ -5,6 +5,8 @@ import { AgentStreamService } from './agent-stream.service';
 import { applyEvent, initialView, type AgentView } from './agent-run.reducer';
 import type { ApplicationInput, CreditState } from './credit.types';
 
+export type AgentMode = 'mock' | 'claude';
+
 export interface AnalystDecision {
   decision: 'approve' | 'reject';
   editedArgs?: { amount?: number; termMonths?: number };
@@ -17,6 +19,9 @@ export class CreditAgentStore {
   private readonly view = signal<AgentView<CreditState>>(initialView<CreditState>());
   private sub?: Subscription;
   private threadId: string | null = null;
+  private runMode: AgentMode = 'mock';
+
+  readonly mode = signal<AgentMode>('mock');
 
   readonly status = computed(() => this.view().status);
   readonly timeline = computed(() => this.view().timeline);
@@ -34,6 +39,7 @@ export class CreditAgentStore {
 
   start(application?: ApplicationInput) {
     this.threadId = crypto.randomUUID();
+    this.runMode = this.mode();
     this.view.set({ ...initialView<CreditState>(), status: 'connecting' });
     this.run({
       threadId: this.threadId,
@@ -42,7 +48,7 @@ export class CreditAgentStore {
       tools: [],
       context: [],
       state: application ?? {},
-      forwardedProps: { mode: 'mock' },
+      forwardedProps: { mode: this.runMode },
     });
   }
 
@@ -57,7 +63,7 @@ export class CreditAgentStore {
       messages: [],
       tools: [],
       context: [],
-      forwardedProps: { mode: 'mock' },
+      forwardedProps: { mode: this.runMode },
       resume: [{ interruptId: interrupt.id, status: 'resolved', payload: decision }],
     });
   }

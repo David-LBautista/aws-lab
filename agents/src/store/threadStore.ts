@@ -11,6 +11,8 @@ export interface ThreadMemory<S = unknown> {
     toolName: string;
     args: Record<string, unknown>;
   };
+  // Datos del servidor que el modelo no debe ver ni poder cambiar.
+  serverContext?: Record<string, unknown>;
   claudeMessages?: Anthropic.MessageParam[];
   pendingToolResults?: Anthropic.ToolResultBlockParam[];
 }

@@ -25,6 +25,20 @@
 
 @if (!store.busy() && store.status() !== 'awaiting_approval') {
   <section class="card form-card">
+    <div class="engine" role="radiogroup" aria-label="Motor del agente">
+      <span class="engine-label">Motor del agente</span>
+      <div class="engine-options">
+        <label class="engine-option" [class.selected]="store.mode() === 'mock'">
+          <input type="radio" name="engine" [checked]="store.mode() === 'mock'" (change)="store.mode.set('mock')" />
+          <span>Simulado</span>
+        </label>
+        <label class="engine-option" [class.selected]="store.mode() === 'claude'" [class.disabled]="!claudeAvailable()">
+          <input type="radio" name="engine" [checked]="store.mode() === 'claude'" [disabled]="!claudeAvailable()" (change)="store.mode.set('claude')" />
+          <span>Claude <small>IA real</small></span>
+        </label>
+      </div>
+      @if (!claudeAvailable()) { <span class="engine-hint">Claude no disponible: falta la API key en el servidor.</span> }
+    </div>
     <app-application-form (start)="store.start($event)" />
   </section>
 }

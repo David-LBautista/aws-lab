@@ -52,6 +52,20 @@ describe('CreditAgentStore', () => {
     expect(store.busy()).toBe(true);
   });
 
+  it('usa el motor seleccionado y conserva el mismo al reanudar', async () => {
+    store.mode.set('claude');
+    store.start();
+    const first = fake.last;
+    expect(first.input.forwardedProps).toEqual({ mode: 'claude' });
+    first.stream.next({ type: EventType.RUN_STARTED, threadId: 't', runId: 'r' });
+    first.stream.next({ type: EventType.RUN_FINISHED, threadId: 't', runId: 'r', outcome: { type: 'interrupt', interrupts: [interrupt] } } as AGUIEvent);
+    await nextFrame();
+
+    store.mode.set('mock');
+    store.respond({ decision: 'approve' });
+    expect(fake.last.input.forwardedProps).toEqual({ mode: 'claude' });
+  });
+
   it('aplica los eventos que llegan del stream', async () => {
     store.start();
     const { stream } = fake.last;

@@ -9,6 +9,16 @@
 @keyframes pulse { 50% { opacity: .4; } }
 .error-message { margin: 0 0 18px; padding: 12px 15px; color: var(--danger); background: var(--danger-bg); border-radius: var(--radius-sm); }
 .form-card { margin-bottom: 20px; }
+.engine { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 18px; font-size: .85rem; }
+.engine-label { color: var(--muted); font-weight: 650; }
+.engine-options { display: inline-flex; gap: 3px; padding: 3px; background: var(--surface-muted); border: 1px solid var(--border); border-radius: 10px; }
+.engine-option { position: relative; display: inline-flex; min-height: 36px; align-items: center; justify-content: center; padding: 6px 12px; border: 1px solid transparent; border-radius: 7px; color: var(--muted); cursor: pointer; transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease; }
+.engine-option input { position: absolute; width: 1px; min-height: 1px; padding: 0; overflow: hidden; opacity: 0; }
+.engine-option.selected { color: var(--text); background: var(--surface); border-color: var(--border); box-shadow: 0 1px 3px rgb(25 35 50 / 8%); font-weight: 650; }
+.engine-option:has(input:focus-visible) { outline: 3px solid color-mix(in srgb, var(--focus) 58%, transparent); outline-offset: 2px; }
+.engine-option small { margin-left: 3px; color: var(--muted); font-size: .72rem; font-weight: 500; }
+.engine-option.disabled { color: var(--muted); opacity: .55; cursor: not-allowed; }
+.engine-hint { color: var(--muted); font-size: .78rem; }
 .agent-layout { display: grid; grid-template-columns: minmax(0, .96fr) minmax(0, 1.04fr); align-items: start; gap: 20px; }
 .agent-layout > .card { min-width: 0; }
 .agent-layout h2 { margin-bottom: 16px; font-size: 1.2rem; }

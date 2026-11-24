@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { CurrencyPipe, JsonPipe, PercentPipe } from '@angular/common';
 import { CreditAgentStore } from '../../agents/credit-agent.store';
+import { environment } from '../../../environments/environment';
 import type { ToolCallView } from '../../agents/agent-run.reducer';
 import type { CheckStatus } from '../../agents/credit.types';
 import { ApplicationForm } from './application-form';
@@ -15,6 +16,14 @@ import { ApplicationForm } from './application-form';
 })
 export class AgenteCredito {
   protected readonly store = inject(CreditAgentStore);
+  protected readonly claudeAvailable = signal(false);
+
+  constructor() {
+    void fetch(`${environment.agentsApiUrl.replace(/\/$/, '')}/api/health`)
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error('Health check failed'))))
+      .then((health: { claudeAvailable?: boolean }) => this.claudeAvailable.set(Boolean(health.claudeAvailable)))
+      .catch(() => this.claudeAvailable.set(false));
+  }
 
   protected readonly statusText: Record<string, string> = {
     idle: 'Listo para analizar',
@@ -68,6 +77,7 @@ export class AgenteCredito {
       if (result.issued === false) return 'no autorizado';
       if (result.sentToManualReview) return 'enviado a revisión';
       if (result.rejected) return 'rechazo confirmado';
+      if (result.error) return 'rechazado por reglas';
     } catch {
       // Un resultado que no sea JSON sigue contando como completado.
     }
