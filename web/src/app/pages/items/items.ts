@@ -5,6 +5,7 @@ import { Item, ItemsService } from '../../services/items.service';
 @Component({
   selector: 'app-items',
   imports: [FormsModule],
+  styleUrl: './items.scss',
   templateUrl: './items.html',
 })
 export class Items implements OnInit {
@@ -39,8 +40,10 @@ export class Items implements OnInit {
   }
 
   remove(id: number) {
-    this.api.remove(id).subscribe(() =>
-      this.items.update((list) => list.filter((i) => i.id !== id)),
-    );
+    this.error.set('');
+    this.api.remove(id).subscribe({
+      next: () => this.items.update((list) => list.filter((i) => i.id !== id)),
+      error: (e) => this.error.set(e.error?.message ?? e.message),
+    });
   }
 }

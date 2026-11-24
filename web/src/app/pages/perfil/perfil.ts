@@ -3,6 +3,7 @@ import { OidcSecurityService } from 'angular-auth-oidc-client';
 
 @Component({
   selector: 'app-perfil',
+  styleUrl: './perfil.scss',
   templateUrl: './perfil.html',
 })
 export class Perfil {

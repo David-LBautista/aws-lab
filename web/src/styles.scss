@@ -1,81 +1,144 @@
-/* You can add global styles to this file, and also import other style files */
 :root {
-  --bg: #0b1020;
-  --surface: #131a2e;
-  --surface-2: #1a2340;
-  --border: #26314f;
-  --text: #e8ebf4;
-  --muted: #9aa4bf;
-  --accent: #ff9900;
-  --accent-ink: #1a1200;
-  --ok: #34d399;
-  --pending: #fbbf24;
-  --radius: 12px;
+  color-scheme: light;
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-muted: #f8f9fb;
+  --surface-strong: #eef0f3;
+  --border: #dfe3e8;
+  --text: #20252d;
+  --muted: #68717e;
+  --accent: #46566b;
+  --accent-hover: #344255;
+  --accent-ink: #ffffff;
+  --focus: #7890ad;
+  --ok: #39735c;
+  --ok-bg: #eaf3ee;
+  --pending: #876a32;
+  --pending-bg: #f5f0e4;
+  --danger: #a44d4d;
+  --danger-bg: #f8eded;
+  --radius-sm: 8px;
+  --radius: 14px;
+  --radius-lg: 20px;
+  --shadow-card: 0 2px 8px rgb(25 35 50 / 4%), 0 12px 30px rgb(25 35 50 / 3%);
 }
 
 * { box-sizing: border-box; }
 
+html { min-width: 320px; background: var(--bg); }
+
 body {
+  min-height: 100vh;
   margin: 0;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  background: var(--bg);
   color: var(--text);
-  line-height: 1.5;
+  background: var(--bg);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
 }
 
-h1, h2, h3 { margin: 0 0 8px; line-height: 1.2; }
-p { margin: 0 0 12px; color: var(--muted); }
+button, input { font: inherit; }
+button { color: inherit; }
+a { color: inherit; }
+
+:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--focus) 58%, transparent);
+  outline-offset: 3px;
+}
+
+h1, h2, h3, p { margin-top: 0; }
+h1, h2, h3 { color: var(--text); line-height: 1.2; letter-spacing: -0.025em; }
+h1 { margin-bottom: 12px; font-size: clamp(2rem, 4vw, 2.8rem); }
+h2 { margin-bottom: 14px; font-size: 1.5rem; }
+h3 { margin-bottom: 8px; font-size: 1.1rem; }
+p { margin-bottom: 12px; color: var(--muted); }
+p:last-child { margin-bottom: 0; }
+
 code {
-  font-family: ui-monospace, 'Cascadia Code', monospace;
-  background: var(--surface-2);
-  padding: 2px 6px;
+  padding: 3px 7px;
+  color: #46566b;
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  font-size: 0.9em;
+  font-family: ui-monospace, 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.88em;
+  overflow-wrap: anywhere;
 }
 
 .btn {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 15px;
   border: 1px solid transparent;
-  border-radius: 8px;
-  padding: 8px 14px;
-  font: inherit;
-  font-weight: 600;
+  border-radius: var(--radius-sm);
+  font-weight: 650;
+  line-height: 1.2;
   cursor: pointer;
-  transition: opacity 0.15s, background 0.15s;
-  &:hover { opacity: 0.9; }
-  &.primary { background: var(--accent); color: var(--accent-ink); }
-  &.ghost { background: transparent; color: var(--text); border-color: var(--border); }
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease;
 }
+.btn:hover { transform: translateY(-1px); }
+.btn.primary { color: var(--accent-ink); background: var(--accent); }
+.btn.primary:hover { background: var(--accent-hover); }
+.btn.ghost { color: var(--text); background: var(--surface); border-color: var(--border); }
+.btn.ghost:hover { background: var(--surface-muted); border-color: #c8ced6; }
+.btn.danger { color: var(--danger); background: var(--danger-bg); border-color: #ecdada; }
 
 .card {
+  padding: 24px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 20px;
+  box-shadow: var(--shadow-card);
 }
 
 .grid {
   display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+  gap: 18px;
 }
 
 .badge {
-  display: inline-block;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 2px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 4px 9px;
   border-radius: 999px;
-  margin-bottom: 10px;
-  &.ok { background: rgba(52, 211, 153, 0.15); color: var(--ok); }
-  &.pending { background: rgba(251, 191, 36, 0.15); color: var(--pending); }
-}
-
-.page-header { margin-bottom: 24px; }
-.eyebrow {
-  color: var(--accent);
-  font-size: 13px;
+  font-size: 0.75rem;
   font-weight: 700;
+  letter-spacing: 0.015em;
+}
+.badge.ok { color: var(--ok); background: var(--ok-bg); }
+.badge.pending { color: var(--pending); background: var(--pending-bg); }
+.badge.application-status { align-self: flex-start; margin: 0; padding: 4px 10px; line-height: 1; white-space: nowrap; }
+
+.page-header { max-width: 680px; margin-bottom: 32px; }
+.eyebrow {
+  margin-bottom: 10px;
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 750;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin-bottom: 6px;
+}
+.page-header > p { max-width: 620px; font-size: 1.05rem; }
+
+input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 13px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+input::placeholder { color: #929aa5; }
+input:focus { border-color: var(--focus); outline: 3px solid color-mix(in srgb, var(--focus) 20%, transparent); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
 }
