@@ -17,7 +17,7 @@ new InfraStack(app, 'AwsLab-Qa-Hosting', {
 new AgentsStack(app, 'AwsLabAgents', {
   env,
   userPoolId: 'us-east-1_e0sVyNKCW',
-  allowedOrigins: ['https://lab.davidlucas.dev', 'http://localhost:4200'],
+  allowedOrigins: ['https://lab.davidlucas.dev', 'https://dev-lab.davidlucas.dev', 'http://localhost:4200'],
 });
 
 //! Si quisieramos crear los otros env
