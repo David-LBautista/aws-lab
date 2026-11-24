@@ -6,4 +6,5 @@ export const environment = {
     clientId: '5oj7qo4f1e3oapck7qvuc2af6r',
   },
   itemsApiUrl: '',
+  agentsApiUrl: 'https://yfkej9kjj9.execute-api.us-east-1.amazonaws.com/prod',
 };

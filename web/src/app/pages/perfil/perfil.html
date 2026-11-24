@@ -1,18 +1,41 @@
 <section class="page-header">
   <div class="eyebrow">Cuenta</div>
-  <h1>Perfil</h1>
+  <h1>Tu perfil</h1>
+  <p>Información asociada a tu identidad de Cognito.</p>
 </section>
 
 @if (isAuthenticated()) {
-  <div class="card">
-    <p><strong>Correo:</strong> {{ user().email }}</p>
-    <p><strong>Correo verificado:</strong> {{ user().email_verified ? 'Sí' : 'No' }}</p>
-    <p>
-      <strong>ID de usuario (sub):</strong> <code>{{ user().sub }}</code>
-    </p>
-  </div>
+  <section class="card profile-card">
+    <div class="profile-intro">
+      <div class="avatar" aria-hidden="true">{{ (user().email ?? '?').charAt(0).toUpperCase() }}</div>
+      <div>
+        <h2>Datos de la cuenta</h2>
+        <p>Identidad verificada por el proveedor de acceso.</p>
+      </div>
+    </div>
+    <dl class="profile-fields">
+      <div class="profile-field">
+        <dt>Correo electrónico</dt>
+        <dd>{{ user().email }}</dd>
+      </div>
+      <div class="profile-field">
+        <dt>Estado del correo</dt>
+        <dd>
+          <span class="badge" [class.ok]="user().email_verified" [class.pending]="!user().email_verified">
+            {{ user().email_verified ? 'Verificado' : 'Pendiente' }}
+          </span>
+        </dd>
+      </div>
+      <div class="profile-field">
+        <dt>ID de usuario</dt>
+        <dd><code>{{ user().sub }}</code></dd>
+      </div>
+    </dl>
+  </section>
 } @else {
-  <div class="card">
-    <p>Inicia sesión para ver los datos de tu cuenta.</p>
-  </div>
+  <section class="card signed-out-card">
+    <span class="profile-icon" aria-hidden="true">↗</span>
+    <h2>Inicia sesión para continuar</h2>
+    <p>Al autenticarte podrás consultar los datos de tu cuenta.</p>
+  </section>
 }

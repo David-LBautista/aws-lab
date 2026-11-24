@@ -1,28 +1,41 @@
 <section class="page-header">
-  <div class="eyebrow">Ruta protegida</div>
+  <div class="eyebrow">Acceso autenticado</div>
   <h1>Zona privada</h1>
-  <p>Datos obtenidos de API Gateway + Lambda, enviando tu token de Cognito.</p>
+  <p>Respuesta de API Gateway y Lambda asociada a tu sesión de Cognito.</p>
 </section>
 
-<div class="card">
+<section class="card response-card" aria-live="polite">
   @if (loading()) {
-    <p>Cargando…</p>
+    <div class="loading-state"><span class="loader" aria-hidden="true"></span><p>Cargando información segura…</p></div>
   } @else if (error()) {
-    <span class="badge pending">Error</span>
+    <span class="badge pending">No disponible</span>
+    <h2>No se pudo cargar la respuesta</h2>
     <p>{{ error() }}</p>
   } @else if (data(); as d) {
-    <span class="badge ok">200 OK</span>
-    <p>
-      Usuario según el token: <code>{{ d.usuario }}</code>
-    </p>
-
-    @for (item of d.items; track item.id) {
-      <p>
-        <span class="badge" [class.ok]="item.hecho" [class.pending]="!item.hecho">
-          Hecho
-        </span>
-        {{ item.titulo }}
-      </p>
-    }
+    <div class="response-heading">
+      <div>
+        <span class="eyebrow">Estado de la solicitud</span>
+        <h2>Conexión correcta</h2>
+      </div>
+      <span class="badge ok">200 OK</span>
+    </div>
+    <div class="identity-row">
+      <span class="field-label">Usuario autenticado</span>
+      <code>{{ d.usuario }}</code>
+    </div>
+    <div class="items-list">
+      <h3>Datos recibidos</h3>
+      @for (item of d.items; track item.id) {
+        <div class="data-row">
+          <span class="status-dot" [class.complete]="item.hecho" aria-hidden="true"></span>
+          <span>{{ item.titulo }}</span>
+          <span class="badge" [class.ok]="item.hecho" [class.pending]="!item.hecho">
+            {{ item.hecho ? 'Hecho' : 'Pendiente' }}
+          </span>
+        </div>
+      } @empty {
+        <p>No hay datos para mostrar.</p>
+      }
+    </div>
   }
-</div>
+</section>

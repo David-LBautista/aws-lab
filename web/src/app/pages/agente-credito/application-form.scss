@@ -1,0 +1,17 @@
+.application-form { display: grid; gap: 20px; }
+.form-heading { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.form-heading h2 { margin: 0 0 5px; font-size: 1.15rem; }
+.form-heading p, .form-footer p { margin: 0; color: var(--muted); font-size: .84rem; }
+.presets { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.presets span { margin-right: 3px; color: var(--muted); font-size: .78rem; }
+.presets button { padding: 5px 9px; color: var(--accent); background: var(--surface-muted); border: 1px solid var(--border); border-radius: 999px; font: inherit; font-size: .75rem; cursor: pointer; }
+.presets button:hover { background: var(--surface-strong); }
+.field-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.field-grid label { display: grid; align-content: start; gap: 6px; color: var(--muted); font-size: .78rem; font-weight: 600; }
+.field-grid input { min-width: 0; }
+.field-grid input.ng-invalid.ng-touched { border-color: var(--danger); }
+.validation-message { margin: 0; color: var(--danger); font-size: .83rem; }
+.form-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-top: 15px; border-top: 1px solid var(--border); }
+.form-footer .btn:disabled { opacity: .48; cursor: not-allowed; transform: none; }
+@media (max-width: 900px) { .field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .field-grid { grid-template-columns: 1fr; } .form-footer { align-items: stretch; flex-direction: column; } .form-footer .btn { width: 100%; } }

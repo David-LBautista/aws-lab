@@ -1,0 +1,190 @@
+<header class="page-header">
+  <p class="eyebrow">Agentes</p>
+  <h1>Agente de crédito</h1>
+  <p>El agente analiza la solicitud paso a paso y tú autorizas la decisión final.</p>
+</header>
+
+<div class="toolbar">
+  @if (store.busy()) {
+    <button class="btn danger" type="button" (click)="store.stop()">Detener</button>
+  }
+
+  <span class="status" role="status" aria-live="polite">
+    <span class="dot" [class]="'dot dot-' + store.status()" aria-hidden="true"></span>
+    {{ statusText[store.status()] }}
+    @if (store.currentStep(); as step) {
+      <span class="current-step">· {{ stepText[step] ?? step }}</span>
+    }
+  </span>
+  <span class="event-count">{{ store.eventCount() }} eventos</span>
+</div>
+
+@if (store.error(); as error) {
+  <p class="error-message" role="alert">{{ error }}</p>
+}
+
+@if (!store.busy() && store.status() !== 'awaiting_approval') {
+  <section class="card form-card">
+    <div class="engine" role="radiogroup" aria-label="Motor del agente">
+      <span class="engine-label">Motor del agente</span>
+      <div class="engine-options">
+        <label class="engine-option" [class.selected]="store.mode() === 'mock'">
+          <input type="radio" name="engine" [checked]="store.mode() === 'mock'" (change)="store.mode.set('mock')" />
+          <span>Simulado</span>
+        </label>
+        <label class="engine-option" [class.selected]="store.mode() === 'claude'" [class.disabled]="!claudeAvailable()">
+          <input type="radio" name="engine" [checked]="store.mode() === 'claude'" [disabled]="!claudeAvailable()" (change)="store.mode.set('claude')" />
+          <span>Claude <small>IA real</small></span>
+        </label>
+      </div>
+      @if (!claudeAvailable()) { <span class="engine-hint">Claude no disponible: falta la API key en el servidor.</span> }
+    </div>
+    <app-application-form (start)="store.start($event)" />
+  </section>
+}
+
+<div class="agent-layout">
+  <section class="card activity-card" aria-label="Actividad del agente">
+    <h2>Actividad del agente</h2>
+
+    <ol class="timeline">
+      @for (item of store.timeline(); track item.id) {
+        @switch (item.kind) {
+          @case ('message') {
+            <li class="message">
+              {{ item.text }}
+              @if (item.streaming) {
+                <span class="cursor" aria-hidden="true"></span>
+              }
+            </li>
+          }
+          @case ('step') {
+            <li class="step">
+              <span class="step-marker" [class.finished]="item.finished" aria-hidden="true">
+                {{ item.finished ? '✓' : '…' }}
+              </span>
+              {{ stepText[item.name] ?? item.name }}
+            </li>
+          }
+          @case ('tool') {
+            @if (store.toolCalls()[item.id]; as call) {
+              <li class="tool-call">
+                <div class="tool-heading">
+                  <strong>{{ toolText[call.name] ?? call.name }}</strong>
+                  <span class="tool-status">{{ toolOutcome(call) }}</span>
+                </div>
+                @if (call.args) {
+                  <pre>{{ call.args | json }}</pre>
+                }
+                @if (call.result) {
+                  <details>
+                    <summary>Ver resultado</summary>
+                    <pre>{{ call.result }}</pre>
+                  </details>
+                }
+              </li>
+            }
+          }
+        }
+      } @empty {
+        <li class="empty-message">Los eventos aparecerán aquí al iniciar el análisis.</li>
+      }
+    </ol>
+  </section>
+
+  <section class="card application-card" aria-label="Solicitud de crédito">
+    @if (store.application(); as application) {
+      <div class="application-heading">
+        <div>
+          <h2>{{ application.applicant.name }}</h2>
+          <p class="application-id">{{ application.applicationId }} · {{ application.request.purpose }}</p>
+        </div>
+        <span [class]="'badge application-status status-' + application.status">
+          {{ applicationStatusText[application.status] }}
+        </span>
+      </div>
+
+      <dl class="facts">
+        <div><dt>Monto solicitado</dt><dd>{{ application.request.amount | currency: 'MXN' : 'symbol-narrow' : '1.0-0' }}</dd></div>
+        <div><dt>Plazo solicitado</dt><dd>{{ application.request.termMonths }} meses</dd></div>
+        <div><dt>Ingreso mensual</dt><dd>{{ application.applicant.monthlyIncome | currency: 'MXN' : 'symbol-narrow' : '1.0-0' }}</dd></div>
+        <div><dt>Deudas mensuales</dt><dd>{{ application.applicant.monthlyDebts | currency: 'MXN' : 'symbol-narrow' : '1.0-0' }}</dd></div>
+        <div><dt>Score crediticio</dt><dd>{{ application.applicant.creditScore ?? '—' }}</dd></div>
+        <div><dt>Antigüedad laboral</dt><dd>{{ application.applicant.employmentYears }} años</dd></div>
+      </dl>
+
+      <div class="section-divider"></div>
+      <h3>Revisiones de riesgo</h3>
+      <ul class="checks">
+        @for (check of application.checks; track check.id) {
+          <li class="check-row" [class]="'check-row check-' + check.status">
+            <span class="check-status">{{ checkIcon[check.status] }}</span>
+            <div>
+              <strong>{{ check.label }}</strong>
+              <p>{{ check.detail }}</p>
+            </div>
+          </li>
+        } @empty {
+          <li class="empty-message">Todavía no hay revisiones.</li>
+        }
+      </ul>
+
+      @if (application.metrics.monthlyPayment; as monthlyPayment) {
+        <div class="section-divider"></div>
+        <h3>Capacidad de pago</h3>
+        <dl class="facts metrics">
+          <div><dt>Tasa anual</dt><dd>{{ application.metrics.annualRate | percent }}</dd></div>
+          <div><dt>Pago mensual</dt><dd>{{ monthlyPayment | currency: 'MXN' : 'symbol-narrow' : '1.0-0' }}</dd></div>
+          <div><dt>Deuda / ingreso</dt><dd>{{ application.metrics.debtToIncome | percent }}</dd></div>
+        </dl>
+      }
+
+      @if (application.recommendation; as recommendation) {
+        <div class="recommendation">
+          <span class="eyebrow">Recomendación del agente</span>
+          <h3>{{ recommendation.decision === 'approve' ? 'Aprobar solicitud' : 'Rechazar solicitud' }}</h3>
+          <p class="recommended-terms">
+            {{ recommendation.amount | currency: 'MXN' : 'symbol-narrow' : '1.0-0' }}
+            a {{ recommendation.termMonths }} meses
+          </p>
+          <p>{{ recommendation.rationale }}</p>
+          @for (condition of recommendation.conditions; track condition) {
+            <p class="condition">{{ condition }}</p>
+          }
+          @if (application.status === 'approved' || application.status === 'rejected' || application.status === 'manual_review') {
+            <p class="final-decision">
+              Decisión del analista:
+              <strong>{{ applicationStatusText[application.status] }}</strong>
+            </p>
+          }
+        </div>
+      }
+
+      @if (store.status() === 'awaiting_approval') {
+        <div class="decision-actions">
+          <p>Revisa la recomendación y registra tu decisión para continuar.</p>
+          <div>
+            @if (pendingTool() === 'reject_loan') {
+              <button class="btn danger" type="button" (click)="store.respond({ decision: 'approve' })">
+                Confirmar rechazo
+              </button>
+              <button class="btn ghost" type="button" (click)="store.respond({ decision: 'reject' })">
+                Enviar a revisión manual
+              </button>
+            } @else {
+              <button class="btn ghost" type="button" (click)="store.respond({ decision: 'reject', reason: 'Rechazado por el analista' })">
+                Rechazar
+              </button>
+              <button class="btn primary" type="button" (click)="store.respond({ decision: 'approve' })">
+                Aprobar crédito
+              </button>
+            }
+          </div>
+        </div>
+      }
+    } @else {
+      <h2>Solicitud</h2>
+      <p class="empty-message">La solicitud aparecerá aquí cuando el agente empiece.</p>
+    }
+  </section>
+</div>

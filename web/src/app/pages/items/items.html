@@ -1,26 +1,45 @@
-<h2>Items (NestJS + PostgreSQL)</h2>
+<section class="page-header">
+  <div class="eyebrow">Persistencia de datos</div>
+  <h1>Items</h1>
+  <p>Administra registros guardados en PostgreSQL a través de la API de NestJS.</p>
+</section>
 
-<form (ngSubmit)="add()">
-  <input
-    name="name"
-    placeholder="Nuevo item"
-    [ngModel]="name()"
-    (ngModelChange)="name.set($event)"
-  />
-  <button type="submit">Agregar</button>
-</form>
+<section class="card items-card">
+  <div class="section-heading">
+    <div>
+      <h2>Lista de items</h2>
+      <p>{{ items().length }} {{ items().length === 1 ? 'registro' : 'registros' }}</p>
+    </div>
+  </div>
 
-@if (error()) {
-  <p class="error">{{ error() }}</p>
-}
+  <form class="add-form" (ngSubmit)="add()">
+    <label class="sr-only" for="new-item">Nombre del nuevo item</label>
+    <input
+      id="new-item"
+      name="name"
+      placeholder="Escribe el nombre de un item"
+      [ngModel]="name()"
+      (ngModelChange)="name.set($event)"
+    />
+    <button class="btn primary" type="submit" [disabled]="!name().trim()">Agregar item</button>
+  </form>
 
-<ul>
-  @for (item of items(); track item.id) {
-    <li>
-      {{ item.name }}
-      <button (click)="remove(item.id)">Borrar</button>
-    </li>
-  } @empty {
-    <li>No hay items todavía.</li>
+  @if (error()) {
+    <p class="error-message" role="alert">{{ error() }}</p>
   }
-</ul>
+
+  <ul class="items-list">
+    @for (item of items(); track item.id) {
+      <li>
+        <span class="item-mark" aria-hidden="true"></span>
+        <span class="item-name">{{ item.name }}</span>
+        <button class="btn danger" type="button" (click)="remove(item.id)">Borrar</button>
+      </li>
+    } @empty {
+      <li class="empty-state">
+        <span class="empty-mark" aria-hidden="true">＋</span>
+        <span><strong>Aún no hay items</strong><small>Agrega el primero usando el campo de arriba.</small></span>
+      </li>
+    }
+  </ul>
+</section>

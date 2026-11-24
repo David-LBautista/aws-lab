@@ -15,6 +15,7 @@ interface ItemsResponse {
 
 @Component({
   selector: 'app-privado',
+  styleUrl: './privado.scss',
   templateUrl: './privado.html',
 })
 export class Privado {
