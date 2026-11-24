@@ -9,6 +9,12 @@ export const routes: Routes = [
   { path: '', component: Home },
   { path: 'perfil', component: Perfil },
   { path: 'privado', component: Privado, canActivate: [autoLoginPartialRoutesGuard] },
+  {
+    path: 'agente-credito',
+    loadComponent: () =>
+      import('./pages/agente-credito/agente-credito').then((m) => m.AgenteCredito),
+    canActivate: [autoLoginPartialRoutesGuard],
+  },
   { path: 'items', component: Items, canActivate: [autoLoginPartialRoutesGuard] },
   { path: '**', redirectTo: '' },
 ];

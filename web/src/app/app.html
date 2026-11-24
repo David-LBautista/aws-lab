@@ -7,6 +7,7 @@
     <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Inicio</a>
     <a routerLink="/perfil" routerLinkActive="active">Perfil</a>
     <a routerLink="/privado" routerLinkActive="active">Privado</a>
+    <a routerLink="/agente-credito" routerLinkActive="active">Agente de crédito</a>
     @if (hasItemsApi) {
       <a routerLink="/items" routerLinkActive="active">Items</a>
     }
@@ -15,7 +16,7 @@
   <div class="session">
     @if (isAuthenticated()) {
       <span class="email">{{ email() }}</span>
-      <button class="btn ghost" (click)="logout()">Cerrar sesi�n</button>
+      <button class="btn ghost" (click)="logout()">Cerrar sesión</button>
     } @else {
       <button class="btn primary" (click)="login()">Iniciar sesión</button>
     }

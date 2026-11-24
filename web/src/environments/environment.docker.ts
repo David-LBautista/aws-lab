@@ -6,4 +6,5 @@ export const environment = {
     clientId: '5oj7qo4f1e3oapck7qvuc2af6r',
   },
   itemsApiUrl: 'http://localhost:3000',
+  agentsApiUrl: 'http://localhost:8787',
 };
