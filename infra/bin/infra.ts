@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import * as cdk from 'aws-cdk-lib/core';
 import { InfraStack } from '../lib/infra-stack';
+import { AgentsStack } from '../lib/agents-stack';
 
 const app = new cdk.App();
 
@@ -11,6 +12,12 @@ const env = { account: '948630188208', region: 'us-east-1' };
 new InfraStack(app, 'AwsLab-Qa-Hosting', {
   env,
   envName: 'qa',
+});
+
+new AgentsStack(app, 'AwsLabAgents', {
+  env,
+  userPoolId: 'us-east-1_e0sVyNKCW',
+  allowedOrigins: ['https://lab.davidlucas.dev', 'http://localhost:4200'],
 });
 
 //! Si quisieramos crear los otros env

@@ -27,6 +27,17 @@ services:
       db:
         condition: service_healthy
 
+  agents:
+    build: ./agents
+    ports:
+      - "8787:8787"
+    environment:
+      PORT: 8787
+      AGENT_MODE: mock
+      MOCK_DELAY_MS: 35
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-5-5}
+
   web:
     build:
       context: ./web
@@ -34,6 +45,9 @@ services:
         NG_CONFIG: docker
     ports:
       - "4200:80"
+    depends_on:
+      agents:
+        condition: service_healthy
 
 volumes:
   db-data:

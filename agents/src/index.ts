@@ -1,16 +1,20 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import { EventType, type RunAgentInput } from '@ag-ui/core';
+import { EventType } from '@ag-ui/core';
 import { SseWriter } from './sse.js';
 import { agents } from './agents/registry.js';
 import { AbortedError } from './agents/types.js';
-import { InMemoryThreadStore } from './store/threadStore.js';
+import { InMemoryThreadStore, type ThreadStore } from './store/threadStore.js';
+import { DynamoThreadStore } from './store/dynamoThreadStore.js';
+import { prepareRun } from './server/prepareRun.js';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const claudeAvailable = Boolean(process.env.ANTHROPIC_API_KEY);
 const defaultMode = process.env.AGENT_MODE ?? (claudeAvailable ? 'claude' : 'mock');
-const store = new InMemoryThreadStore(); // paso 7: DynamoThreadStore
+const store: ThreadStore = process.env.THREADS_TABLE
+  ? new DynamoThreadStore(process.env.THREADS_TABLE)
+  : new InMemoryThreadStore();
 
 const app = express();
 app.use(cors({ origin: ['http://localhost:4200', 'http://localhost:5173'] }));
@@ -26,30 +30,11 @@ app.get('/api/health', (_req, res) => {
 
 // Endpoint AG-UI: recibe un RunAgentInput (POST) y responde con un stream SSE de eventos.
 app.post('/api/agents/:agentId', async (req, res) => {
-  const entry = agents[req.params.agentId];
-  if (!entry) {
-    res.status(404).json({ error: `Unknown agent "${req.params.agentId}"` });
+  const run = prepareRun(req.params.agentId, req.body, { claudeAvailable, defaultMode });
+  if (!run.ok) {
+    res.status(run.status).json({ error: run.error });
     return;
   }
-
-  const input = req.body as RunAgentInput;
-  if (!input?.threadId || !input?.runId || !Array.isArray(input?.messages)) {
-    res
-      .status(400)
-      .json({ error: 'Body must be a RunAgentInput with threadId, runId and messages' });
-    return;
-  }
-
-  const mode = (input.forwardedProps?.mode as string | undefined) ?? defaultMode;
-  if (mode === 'claude' && !claudeAvailable) {
-    res.status(400).json({ error: 'Claude mode needs ANTHROPIC_API_KEY' });
-    return;
-  }
-  if (mode === 'claude' && !entry.claude) {
-    res.status(400).json({ error: `Agent "${req.params.agentId}" has no Claude version yet` });
-    return;
-  }
-  const agent = mode === 'claude' ? entry.claude! : entry.mock;
 
   const sse = new SseWriter(res);
   const controller = new AbortController();
@@ -58,7 +43,7 @@ app.post('/api/agents/:agentId', async (req, res) => {
   const heartbeat = setInterval(() => sse.heartbeat(), 15_000);
 
   try {
-    await agent({ input, emit: (e) => sse.send(e), signal: controller.signal, store });
+    await run.agent({ input: run.input, emit: (e) => sse.send(e), signal: controller.signal, store });
   } catch (err) {
     if (!(err instanceof AbortedError) && !controller.signal.aborted) {
       console.error(err);
@@ -70,6 +55,4 @@ app.post('/api/agents/:agentId', async (req, res) => {
   }
 });
 
-app.listen(PORT, () =>
-  console.log(`Agents API on http://localhost:${PORT} (mode: ${defaultMode})`),
-);
+app.listen(PORT, () => console.log(`Agents API on http://localhost:${PORT} (mode: ${defaultMode}, store: ${process.env.THREADS_TABLE ? 'dynamodb' : 'memory'})`));
